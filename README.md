@@ -23,7 +23,7 @@ Open the desired chat on your mobile device, tap the three dots or contact name,
 
 ### SMS Data
 To extract SMS conversations from an Android device, we strongly endorse the free and highly reliable FOSS application **SMS Import and Export**. 
-You can download it securely from F-Droid: [https://f-droid.org/packages/com.github.tmo1.sms_ie/](https://f-droid.org/packages/com.github.tmo1.sms_ie/). Load the exported JSON files right into Chat Data Exporter Pro. 
+You can download it securely from F-Droid: [https://f-droid.org/packages/com.github.tmo1.sms_ie/](https://f-droid.org/packages/com.github.tmo1.sms_ie/). Load the exported JSON files right into Memorator. 
 
 ## Getting Started Locally
 1. Clone the repository.
