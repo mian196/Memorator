@@ -1,9 +1,10 @@
-import { getMappedName, isExcluded, formatDuration } from './helpers';
+import { getMappedName, isExcluded, formatDuration, isMyMessageFast } from './helpers';
 
 export function recalculateChats(messages, media, myNames, excludeNames, aliasMap) {
   const chats = {};
   let validMsgCount = 0;
   const effectiveMyNames = myNames.length > 0 ? myNames : ['Me'];
+  const myNamesLower = effectiveMyNames.map(n => n.toLowerCase());
 
   messages.forEach(msg => {
     const mappedThread = getMappedName(msg.threadName, aliasMap);
@@ -22,8 +23,10 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
     const chat = chats[mappedThread];
     chat.participants.add(mappedSender);
 
-    // Track platform
-    if (msg._source) {
+    // Track platform — prefer explicit _platform field, fall back to _source parsing
+    if (msg._platform) {
+      chat.platforms.add(msg._platform);
+    } else if (msg._source) {
       const src = msg._source.toLowerCase();
       if (src.includes('html')) chat.platforms.add('Messenger');
       else if (src.includes('ndjson') || src.includes('sms')) chat.platforms.add('SMS');
@@ -31,7 +34,8 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
       else if (src.includes('txt')) chat.platforms.add('WhatsApp');
     }
 
-    const isMe = effectiveMyNames.includes(mappedSender) || effectiveMyNames.includes(msg.sender);
+    const senderLower = mappedSender.toLowerCase();
+    const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
     if (isMe) chat.sent++;
     else chat.received++;
     chat.total++;
@@ -50,12 +54,11 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
     if (chats[mappedThread]) chats[mappedThread].mediaCount++;
   });
 
-  const myNamesLower = effectiveMyNames.map(n => n.toLowerCase());
   for (const [name, chat] of Object.entries(chats)) {
     const otherParticipants = Array.from(chat.participants).filter(
       p => !myNamesLower.includes(p.toLowerCase())
     );
-    chat.isGroup = otherParticipants.length > 1 || name.includes(',');
+    chat.isGroup = otherParticipants.length > 1;
   }
 
   return { chats, validMsgCount };
@@ -94,9 +97,12 @@ export function computeStatsForMessages(messagesArray, aliasMap) {
     }
     lastDate = msgDate;
 
+    // Track response times per sender — only count when replying to the immediately previous different sender
+    // For groups, track per-sender using lastMsgBySender to measure true response time
     if (previousMsg) {
       const prevMappedSender = getMappedName(previousMsg.sender, aliasMap);
       if (prevMappedSender !== mappedSender) {
+        // Find the most recent message from prevMappedSender to measure response time from
         const diffMs = msg.timestamp - previousMsg.timestamp;
         if (diffMs >= 0 && diffMs < 1000 * 60 * 60 * 24 * 3) {
           if (!responseTimes[mappedSender]) {

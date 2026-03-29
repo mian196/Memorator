@@ -36,6 +36,21 @@ export function getMappedName(name, aliasMap) {
   return !name ? 'Unknown' : (aliasMap[name.toLowerCase()] || name);
 }
 
+export function isMyMessage(sender, myNames, aliasMap) {
+  const myNamesLower = myNames.map(n => n.toLowerCase());
+  const mappedSender = getMappedName(sender, aliasMap);
+  const mappedLower = mappedSender.toLowerCase();
+  const rawLower = (sender || '').toLowerCase();
+  return myNamesLower.includes(mappedLower) || myNamesLower.includes(rawLower);
+}
+
+export function isMyMessageFast(sender, myNamesLower, aliasMap) {
+  const mappedSender = getMappedName(sender, aliasMap);
+  const mappedLower = mappedSender.toLowerCase();
+  const rawLower = (sender || '').toLowerCase();
+  return myNamesLower.includes(mappedLower) || myNamesLower.includes(rawLower);
+}
+
 export function isExcluded(threadName, senderName, excludeNames) {
   if (excludeNames.length === 0) return false;
   const tLower = (threadName || '').toLowerCase();
@@ -191,11 +206,13 @@ export function escapeRegExp(string) {
 }
 
 export function detectPlatform(msg) {
-  if (!msg || !msg._source) return 'Unknown';
+  if (!msg) return 'Unknown';
+  if (msg._platform) return msg._platform;
+  if (!msg._source) return 'Unknown';
   const src = msg._source.toLowerCase();
   if (src.includes('sms') || src.includes('ndjson')) return 'SMS';
   if (src.includes('whatsapp') || src.includes('txt')) return 'WhatsApp';
-  if (src.includes('facebook') || src.includes('html') || src.includes('json')) return 'Messenger';
+  if (src.includes('html') || src.includes('json')) return 'Messenger';
   return 'Unknown';
 }
 
