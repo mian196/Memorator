@@ -334,7 +334,7 @@ export function AppProvider({ children }) {
       alert('Error saving state.');
       dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } });
     }
-  }, [state.messages, state.media, state.myNamesRaw, state.excludeRaw, state.aliasRaw]);
+  }, [state.messages, state.media, state.myNamesRaw, state.excludeRaw, state.aliasRaw, state.dateFormat]);
 
   const handleLoad = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Loading from Local Storage...' } });
