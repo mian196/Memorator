@@ -25,36 +25,78 @@ function isUrdu(text) {
 
 let _urduFontReady = false;
 
+// Cache font data in IndexedDB so subsequent sessions don't need network
+async function getCachedFontData(key) {
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('MemoratorFontCache', 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore('fonts');
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = () => reject();
+    });
+    const tx = db.transaction('fonts', 'readonly');
+    const req = tx.objectStore('fonts').get(key);
+    return new Promise(resolve => {
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+async function setCachedFontData(key, data) {
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('MemoratorFontCache', 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore('fonts');
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = () => reject();
+    });
+    const tx = db.transaction('fonts', 'readwrite');
+    tx.objectStore('fonts').put(data, key);
+  } catch { /* ignore cache write failures */ }
+}
+
+async function loadFontWithCache(url, cacheKey) {
+  // Try IndexedDB cache first
+  const cached = await getCachedFontData(cacheKey);
+  if (cached) return cached;
+  // Fetch from network
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  await setCachedFontData(cacheKey, buffer);
+  return buffer;
+}
+
 async function ensureUrduFont() {
   if (_urduFontReady) return;
-  
-  // Use FontFace API to load the font binary directly — this guarantees
-  // the font is available to canvas rendering (CSS <link> is unreliable for canvas)
+
+  const REGULAR_URL = "https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhWNMUPbN-oZdNFcBy1-DJYsEoTq5pudQ9L940pGPkB3Qt_-DK0.ttf";
+  const BOLD_URL = "https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhWNMUPbN-oZdNFcBy1-DJYsEoTq5pudQ9L940pGPkB3Qjj5DK0.ttf";
+
   try {
-    const regularFont = new FontFace(
-      'Noto Nastaliq Urdu',
-      "url(https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhWNMUPbN-oZdNFcBy1-DJYsEoTq5pudQ9L940pGPkB3Qt_-DK0.ttf)",
-      { weight: '400', style: 'normal' }
-    );
-    const boldFont = new FontFace(
-      'Noto Nastaliq Urdu',
-      "url(https://fonts.gstatic.com/s/notonastaliqurdu/v23/LhWNMUPbN-oZdNFcBy1-DJYsEoTq5pudQ9L940pGPkB3Qjj5DK0.ttf)",
-      { weight: '700', style: 'normal' }
-    );
-    
+    const [regularBuf, boldBuf] = await Promise.all([
+      loadFontWithCache(REGULAR_URL, 'noto-nastaliq-regular'),
+      loadFontWithCache(BOLD_URL, 'noto-nastaliq-bold')
+    ]);
+
+    const regularFont = new FontFace('Noto Nastaliq Urdu', regularBuf, { weight: '400', style: 'normal' });
+    const boldFont = new FontFace('Noto Nastaliq Urdu', boldBuf, { weight: '700', style: 'normal' });
+
     const [loadedRegular, loadedBold] = await Promise.all([
       regularFont.load(),
       boldFont.load()
     ]);
-    
+
     document.fonts.add(loadedRegular);
     document.fonts.add(loadedBold);
     await document.fonts.ready;
-    
+
     _urduFontReady = true;
-    console.log("Noto Nastaliq Urdu font loaded via FontFace API (Nastaleeq style confirmed)");
+    console.log("Noto Nastaliq Urdu font loaded (cached in IndexedDB)");
   } catch (e) {
-    console.warn("Could not load Noto Nastaliq Urdu font:", e);
+    console.warn("Could not load Noto Nastaliq Urdu font — Urdu text will use fallback rendering:", e);
+    // Don't set _urduFontReady = true, so isUrdu text falls through to doc.text
   }
 }
 
@@ -298,7 +340,10 @@ export async function generateEbookPdf(data, onProgress) {
     for (let c = 0; c < totalConvs; c++) {
       const conv = conversations[c];
       
-      onProgress(10 + Math.floor((c / totalConvs) * 85), `Processing Chat ${c + 1}/${totalConvs}: ${conv.name} (${conv.total} msgs)`);
+      const totalMsgsSoFar = conversations.slice(0, c).reduce((sum, cv) => sum + (cv.messages || []).length, 0);
+      const totalMsgsAll = conversations.reduce((sum, cv) => sum + (cv.messages || []).length, 0);
+      const msgPct = totalMsgsAll > 0 ? Math.floor((totalMsgsSoFar / totalMsgsAll) * 85) : Math.floor((c / totalConvs) * 85);
+      onProgress(10 + msgPct, `Processing Chat ${c + 1}/${totalConvs}: ${conv.name} (${conv.total} msgs)`);
       await new Promise(r => setTimeout(r, 0)); // UI breathe
       
       // Title Page (no header on title pages)
@@ -408,19 +453,19 @@ export async function generateEbookPdf(data, onProgress) {
          
          let msgText = String(msg.content || '[Media omitted]');
          
-         // Strip emojis and special symbols that jsPDF fonts can't render
-         msgText = msgText.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '') // Surrogate pair emojis
-                          .replace(/[\u2600-\u27BF]/g, '')    // Misc symbols & dingbats
+         // Strip emojis that jsPDF fonts can't render (per EXPORT-01)
+         msgText = msgText.replace(/\p{Extended_Pictographic}/gu, '')
                           .replace(/[\uFE00-\uFE0F]/g, '')    // Variation selectors
-                          .replace(/[\u200D]/g, '')            // Zero-width joiner
-                          .replace(/[\u20E3]/g, '')            // Combining enclosing keycap
-                          .replace(/[\u2300-\u23FF]/g, '')     // Misc technical symbols
-                          .replace(/[\u2B50-\u2B55]/g, '')     // Stars, circles
-                          .replace(/[\u3030\u303D]/g, '')      // CJK symbols
-                          .replace(/[\uFE00-\uFEFF]/g, '')    // Special block
-                          .replace(/\*\*(.*?)\*\*/g, '$1')
-                          .replace(/\*(.*?)\*/g, '$1')
-                          .replace(/~~(.*?)~~/g, '$1');
+                          .replace(/[\u200D]/g, '')             // Zero-width joiner
+                          .replace(/[\u200B-\u200F]/g, '')      // Zero-width spaces and marks
+                          .replace(/[\u2028-\u202F]/g, '')      // Line/paragraph separators
+                          .replace(/[\u2060-\u206F]/g, '')      // Word joiners, invisible operators
+                          .replace(/[\uFFFC\uFFFD]/g, '')       // Object replacement, replacement char
+                          .replace(/[\u20E3]/g, '')              // Combining enclosing keycap
+                          .replace(/[\uFE00-\uFEFF]/g, '')      // Specials block
+                          .replace(/\*\*(.*?)\*\*/g, '$1')      // Bold markdown
+                          .replace(/\*(.*?)\*/g, '$1')           // Italic markdown
+                          .replace(/~~(.*?)~~/g, '$1');          // Strikethrough markdown
          
          doc.setFontSize(11);
          const senderText = `${sender}: `;
@@ -456,28 +501,32 @@ export async function generateEbookPdf(data, onProgress) {
                let availableW = textWidth - (curLine === '' ? curW : 0);
                
                if (wWidth > availableW) {
-                  // If word is massive, chunk it first to avoid O(N^2) in char loop
-                  let wParts = [];
-                  let tempW = w;
-                  while (tempW.length > 500) {
-                     wParts.push(tempW.substring(0, 500));
-                     tempW = tempW.substring(500);
-                  }
-                  wParts.push(tempW);
-
-                  for (let part of wParts) {
-                     let sub = '';
-                     for (let char of part) {
-                        if ((curLine === '' ? curW : 0) + doc.getTextWidth(curLine + sub + char) > textWidth) {
-                           if (curLine || sub) lines.push(curLine + sub);
-                           curLine = '';
-                           curW = 0;
-                           sub = char;
-                        } else {
-                           sub += char;
-                        }
+                  // Break long word using estimated char width to avoid O(N^2)
+                  const avgCharW = wWidth / w.length;
+                  const maxCharsPerLine = Math.max(1, Math.floor(textWidth / avgCharW));
+                  let pos = 0;
+                  while (pos < w.length) {
+                     const chunk = w.substring(pos, pos + maxCharsPerLine);
+                     const chunkW = doc.getTextWidth(chunk);
+                     if (curLine !== '' && curW + chunkW > textWidth) {
+                        lines.push(curLine.trimEnd());
+                        curLine = '';
+                        curW = 0;
                      }
-                     curLine += sub;
+                     if (chunkW > textWidth && chunk.length > 1) {
+                        // Chunk still too wide, take fewer chars
+                        const safeLen = Math.max(1, Math.floor(chunk.length * (textWidth / chunkW)));
+                        const safePart = w.substring(pos, pos + safeLen);
+                        if (curLine) lines.push(curLine.trimEnd());
+                        lines.push(safePart);
+                        curLine = '';
+                        curW = 0;
+                        pos += safeLen;
+                     } else {
+                        curLine += chunk;
+                        curW = doc.getTextWidth(curLine);
+                        pos += chunk.length;
+                     }
                   }
                   curLine += ' ';
                   curW = doc.getTextWidth(curLine);
