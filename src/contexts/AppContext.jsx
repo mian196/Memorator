@@ -20,6 +20,7 @@ const initialState = {
   myNames: [],
   excludeNames: [],
   aliasMap: {},
+  dateFormat: 'auto',
   fileRegistry: {},
   sidebarFilter: 'all',
   searchQuery: '',
@@ -48,6 +49,7 @@ function reducer(state, action) {
         myNamesRaw: action.payload.myNamesRaw ?? state.myNamesRaw,
         excludeRaw: action.payload.excludeRaw ?? state.excludeRaw,
         aliasRaw: action.payload.aliasRaw ?? state.aliasRaw,
+        dateFormat: action.payload.dateFormat ?? state.dateFormat,
         myNames, excludeNames, aliasMap
       };
     }
@@ -169,15 +171,17 @@ function reducer(state, action) {
         activeChatName: null, activeView: 'search'
       };
     case 'RESTORE_STATE': {
+      const dateFormat = action.payload.dateFormat || 'auto';
+      const dateOrder = (dateFormat === 'DMY' || dateFormat === 'MDY') ? dateFormat : null;
       const restoredMsgs = (action.payload.messages || []).map(m => {
         if (m.dateStr && (m.timestamp === 0 || !m.timestamp)) {
-          return { ...m, timestamp: parseTimestamp(m.dateStr) };
+          return { ...m, timestamp: parseTimestamp(m.dateStr, dateOrder) };
         }
         return m;
       });
       const restoredMedia = (action.payload.media || []).map(m => {
         if (m.dateStr && (m.timestamp === 0 || !m.timestamp)) {
-          return { ...m, timestamp: parseTimestamp(m.dateStr) };
+          return { ...m, timestamp: parseTimestamp(m.dateStr, dateOrder) };
         }
         return m;
       });
@@ -275,6 +279,7 @@ export function AppProvider({ children }) {
     const CHUNK = 20;
 
     const currMyNames = parseInputList(state.myNamesRaw);
+    const currDateFormat = state.dateFormat;
     const mergedRegistry = { ...state.fileRegistry, ...registry };
 
     let processedCount = 0;
@@ -296,7 +301,7 @@ export function AppProvider({ children }) {
               result = parseJSON(text, file.webkitRelativePath, currMyNames, mergedRegistry);
             }
           }
-          else if (file.name.endsWith('.txt')) result = parseWhatsAppTXT(text, file.name, currMyNames);
+          else if (file.name.endsWith('.txt')) result = parseWhatsAppTXT(text, file.name, currMyNames, currDateFormat);
           else result = parseHTML(text, file.webkitRelativePath, currMyNames, mergedRegistry);
 
           allMessages.push(...result.messages);
@@ -313,17 +318,16 @@ export function AppProvider({ children }) {
     }
 
     dispatch({ type: 'ADD_MESSAGES', payload: { messages: allMessages, media: allMedia } });
-    // Recalculate after a tick to let state update
-    setTimeout(() => {
-      dispatch({ type: 'RECALCULATE' });
-      dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } });
-    }, 50);
-  }, [state.myNamesRaw, state.fileRegistry]);
+    // Use requestAnimationFrame to ensure state is committed before recalculating
+    await new Promise(r => requestAnimationFrame(r));
+    dispatch({ type: 'RECALCULATE' });
+    dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } });
+  }, [state.myNamesRaw, state.fileRegistry, state.dateFormat]);
 
   const handleSave = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Saving to Local Storage...' } });
     try {
-      await saveStateToDB(state.messages, state.media, state.myNamesRaw, state.excludeRaw, state.aliasRaw);
+      await saveStateToDB(state.messages, state.media, state.myNamesRaw, state.excludeRaw, state.aliasRaw, state.dateFormat);
       dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Saved Successfully!' } });
       setTimeout(() => dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } }), 500);
     } catch (e) {
@@ -340,7 +344,7 @@ export function AppProvider({ children }) {
         dispatch({ type: 'RESTORE_STATE', payload: data });
         dispatch({
           type: 'SET_CONFIG',
-          payload: { myNamesRaw: data.myNamesRaw, excludeRaw: data.excludeRaw, aliasRaw: data.aliasRaw }
+          payload: { myNamesRaw: data.myNamesRaw, excludeRaw: data.excludeRaw, aliasRaw: data.aliasRaw, dateFormat: data.dateFormat }
         });
         dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Loaded Successfully!' } });
         setTimeout(() => {
