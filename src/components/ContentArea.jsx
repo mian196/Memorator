@@ -80,16 +80,14 @@ export default function ContentArea() {
     if (!name) return;
     if (!confirm(`Are you sure you want to permanently exclude "${name}" from all calculations?`)) return;
     dispatch({ type: 'EXCLUDE_NAME', payload: name });
-    setTimeout(() => {
-      dispatch({ type: 'RECALCULATE' });
-    }, 50);
+    dispatch({ type: 'RECALCULATE' });
   }, [dispatch]);
 
   const removeResource = useCallback((sourceType) => {
     if (!activeChatName) return;
     if (!confirm(`Are you sure you want to delete all "${sourceType}" records for "${activeChatName}"?`)) return;
     dispatch({ type: 'DELETE_CHAT_RESOURCE', payload: { chatName: activeChatName, source: sourceType } });
-    setTimeout(() => dispatch({ type: 'RECALCULATE' }), 50);
+    dispatch({ type: 'RECALCULATE' });
   }, [activeChatName, dispatch]);
 
   const separateResource = useCallback((sourceType) => {
@@ -98,16 +96,14 @@ export default function ContentArea() {
     if (!newName || newName.trim() === '') return;
     
     dispatch({ type: 'SEPARATE_CHAT_RESOURCE', payload: { chatName: activeChatName, source: sourceType, newChatName: newName.trim() } });
-    setTimeout(() => {
-      dispatch({ type: 'RECALCULATE' });
-    }, 50);
+    dispatch({ type: 'RECALCULATE' });
   }, [activeChatName, dispatch]);
 
   const deleteChat = useCallback(() => {
     if (!activeChatName) return;
     if (!confirm(`Are you sure you want to permanently delete ALL records for "${activeChatName}" from memory?`)) return;
     dispatch({ type: 'DELETE_CHAT', payload: activeChatName });
-    setTimeout(() => dispatch({ type: 'RECALCULATE' }), 50);
+    dispatch({ type: 'RECALCULATE' });
   }, [activeChatName, dispatch]);
 
   // Subtitle for groups
@@ -380,7 +376,7 @@ export default function ContentArea() {
               {chatData && (() => {
                 const resourceMap = {};
                 chatData.list.forEach(msg => {
-                  const plat = msg.platform || msg._source || 'unknown';
+                  const plat = msg._platform || msg._source || 'unknown';
                   if (!resourceMap[plat]) resourceMap[plat] = { count: 0, first: Infinity, last: 0 };
                   resourceMap[plat].count++;
                   if (msg.timestamp > 0) {
