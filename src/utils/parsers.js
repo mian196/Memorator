@@ -63,8 +63,9 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
 
   sections.forEach(sec => {
     const senderEl = sec.querySelector('h2');
-    // Skip Word effects sections — no h2, content starts with "Word:" metadata
-    if (!senderEl && sec.textContent.trim().startsWith('Word:')) return;
+    // Skip any section without a sender h2 — real messages always have one.
+    // Word effects, system metadata, and other non-message sections have no h2.
+    if (!senderEl) return;
     // Content: try known class first, then any div between h2 and footer
     let contentEl = sec.querySelector('._a6-p');
     if (!contentEl) {
@@ -78,17 +79,12 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
       }
     }
     const footerEl = sec.querySelector('footer');
-    const sender = senderEl ? senderEl.textContent.trim() : 'Unknown';
+    const sender = senderEl.textContent.trim();
     // Date is inside footer > div._a72d, not directly in footer
     let dateStr = '';
     if (footerEl) {
       const dateDiv = footerEl.querySelector('._a72d') || footerEl;
       dateStr = dateDiv.textContent.trim();
-    }
-    // Word effects sections have no footer — extract "Creation time:" from content
-    if (!dateStr && !senderEl) {
-      const creationMatch = sec.textContent.match(/Creation time:\s*(.+?)(?:\n|$)/i);
-      if (creationMatch) dateStr = creationMatch[1].trim();
     }
 
     let contentText = contentEl
