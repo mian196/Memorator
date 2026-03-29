@@ -40,7 +40,7 @@ async function getCachedFontData(key) {
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
     });
-  } catch { return null; }
+  } catch (e) { console.warn('Font cache read failed:', e); return null; }
 }
 
 async function setCachedFontData(key, data) {
@@ -53,7 +53,7 @@ async function setCachedFontData(key, data) {
     });
     const tx = db.transaction('fonts', 'readwrite');
     tx.objectStore('fonts').put(data, key);
-  } catch { /* ignore cache write failures */ }
+  } catch (e) { console.warn('Font cache write failed (possibly quota exceeded):', e); }
 }
 
 async function loadFontWithCache(url, cacheKey) {
