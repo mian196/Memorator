@@ -69,17 +69,22 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
     if (!senderEl) return;
 
     // Word effects sections: sender h2 = "Word effects", no footer, content = metadata text
+    // Multiple effects are concatenated with no newlines: "Word: XAnimation effect: YCreation time: ZWord: A..."
     if (senderEl.textContent.trim() === 'Word effects') {
       const rawText = sec.textContent || '';
-      const wordMatch = rawText.match(/Word:\s*(.+?)(?=Animation effect:|Creation time:|$)/i);
-      const effectMatch = rawText.match(/Animation effect:\s*(.+?)(?=Creation time:|$)/i);
-      const timeMatch = rawText.match(/Creation time:\s*(.+?)(?:\n|$)/i);
-      const word = wordMatch ? wordMatch[1].trim() : '';
-      const effect = effectMatch ? effectMatch[1].trim() : '';
-      const createdAt = timeMatch ? timeMatch[1].trim() : '';
-      if (word || effect) {
-        wordEffects.push({ threadName, word, effect, createdAt, _source: source });
-      }
+      // Split on "Word:" boundaries — each entry starts with "Word:"
+      const entries = rawText.split(/(?=Word:)/i).filter(e => /Word:/i.test(e));
+      entries.forEach(entry => {
+        const wordMatch = entry.match(/Word:\s*(.+?)(?=Animation effect:|Creation time:|$)/i);
+        const effectMatch = entry.match(/Animation effect:\s*(.+?)(?=Creation time:|$)/i);
+        const timeMatch = entry.match(/Creation time:\s*(.+?)(?=Word:|$)/i);
+        const word = wordMatch ? wordMatch[1].trim() : '';
+        const effect = effectMatch ? effectMatch[1].trim() : '';
+        const createdAt = timeMatch ? timeMatch[1].trim() : '';
+        if (word || effect) {
+          wordEffects.push({ threadName, word, effect, createdAt, _source: source });
+        }
+      });
       return;
     }
     // Content: try known class first, then any div between h2 and footer
