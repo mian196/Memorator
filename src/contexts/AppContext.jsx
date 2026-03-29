@@ -123,12 +123,12 @@ function reducer(state, action) {
       const { chatName, source } = action.payload;
       const newMsgs = state.messages.filter(m => {
         if (getMappedName(m.threadName, state.aliasMap) !== chatName) return true;
-        const msgPlatform = m.platform || m._source || 'unknown';
+        const msgPlatform = m._platform || m._source || 'unknown';
         return msgPlatform !== source;
       });
       const newMed = state.media.filter(m => {
         if (getMappedName(m.threadName, state.aliasMap) !== chatName) return true;
-        const msgPlatform = m.platform || m._source || 'unknown';
+        const msgPlatform = m._platform || m._source || 'unknown';
         return msgPlatform !== source;
       });
       return { ...state, messages: newMsgs, media: newMed };
@@ -137,7 +137,7 @@ function reducer(state, action) {
       const { chatName, source, newChatName } = action.payload;
       const newMsgs = state.messages.map(m => {
         if (getMappedName(m.threadName, state.aliasMap) !== chatName) return m;
-        const msgPlatform = m.platform || m._source || 'unknown';
+        const msgPlatform = m._platform || m._source || 'unknown';
         if (msgPlatform === source) {
           return { ...m, threadName: newChatName };
         }
@@ -145,7 +145,7 @@ function reducer(state, action) {
       });
       const newMed = state.media.map(m => {
         if (getMappedName(m.threadName, state.aliasMap) !== chatName) return m;
-        const msgPlatform = m.platform || m._source || 'unknown';
+        const msgPlatform = m._platform || m._source || 'unknown';
         if (msgPlatform === source) {
           return { ...m, threadName: newChatName };
         }
@@ -347,10 +347,10 @@ export function AppProvider({ children }) {
           payload: { myNamesRaw: data.myNamesRaw, excludeRaw: data.excludeRaw, aliasRaw: data.aliasRaw, dateFormat: data.dateFormat }
         });
         dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Loaded Successfully!' } });
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           dispatch({ type: 'RECALCULATE' });
           dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } });
-        }, 100);
+        });
       } else {
         alert('No saved state found.');
         dispatch({ type: 'SET_LOADING', payload: { loading: false, message: '' } });
