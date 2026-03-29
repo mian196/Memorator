@@ -288,14 +288,12 @@ export default function ContentArea() {
               if (visibleMsgs.length > 200) {
                 return (
                   <VirtualList
-                    height={600}
-                    itemCount={visibleMsgs.length}
-                    itemSize={80}
-                    width="100%"
-                    initialScrollOffset={visibleMsgs.length * 80}
-                  >
-                    {ChatRow}
-                  </VirtualList>
+                    rowCount={visibleMsgs.length}
+                    rowHeight={80}
+                    rowComponent={ChatRow}
+                    rowProps={{}}
+                    style={{ height: 600, width: "100%" }}
+                  />
                 );
               }
               return visibleMsgs.map((msg, i) => {
