@@ -161,14 +161,17 @@ export function parseTimestamp(dateStr, dateOrder = null) {
     return new Date(parseInt(yr, 10), m, day, hr, parseInt(min, 10), sec ? parseInt(sec, 10) : 0).getTime();
   }
 
-  // Handle Pirate/Messenger HTML dates like "April 22, 2025 10:08:35 PM"
+  // Handle Facebook HTML dates like "Jun 10, 2023 6:23:41 pm" or "April 22, 2025 10:08:35 PM"
   const textMatch = clean.match(
     /([a-zA-Z]+)\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])/
   );
   if (textMatch) {
     let [, monthStr, d, yr, hr, min, sec, ampm] = textMatch;
     const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-    let m = months.indexOf(monthStr.toLowerCase());
+    const monthsAbbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const key = monthStr.toLowerCase();
+    let m = months.indexOf(key);
+    if (m === -1) m = monthsAbbr.indexOf(key);
     if (m === -1) m = 0; // Fallback
 
     hr = parseInt(hr, 10);
