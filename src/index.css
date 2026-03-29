@@ -444,6 +444,9 @@ select.sidebar-input option {
   color: var(--text-main); padding: 10px 12px; border-radius: 6px;
   font-family: inherit; font-size: 0.9rem;
 }
+.ebook-form-group select option {
+  background: #1e2128; color: #e2e8f0;
+}
 .ebook-form-group input:focus,
 .ebook-form-group select:focus {
   border-color: var(--accent-primary); outline: none;

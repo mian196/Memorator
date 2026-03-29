@@ -197,8 +197,152 @@ const THEMES = {
   }
 };
 
+async function generateSimplePdf(data, onProgress) {
+  try {
+    const doc = new jsPDF({ format: 'a4', unit: 'mm' });
+    const { ebookName, aliases, conversations, fontFamily } = data;
+    const font = fontFamily || 'times';
+    const myNamesLower = (data.myNames || []).map(n => n.toLowerCase());
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const textWidth = pageWidth - margin * 2;
+    const lineH = 5.5;
+
+    let y = margin;
+
+    const addPage = () => {
+      doc.addPage();
+      y = margin;
+    };
+
+    const checkY = (needed) => {
+      if (y + needed > pageHeight - margin) addPage();
+    };
+
+    onProgress(5, 'Building cover page...');
+
+    // Cover
+    doc.setFont(font, 'bold');
+    doc.setFontSize(26);
+    doc.setTextColor(0, 0, 0);
+    const titleLines = doc.splitTextToSize(ebookName || 'My Chat Archive', textWidth);
+    let titleY = pageHeight / 3;
+    titleLines.forEach(line => { doc.text(line, pageWidth / 2, titleY, { align: 'center' }); titleY += 13; });
+    doc.setFont(font, 'normal');
+    doc.setFontSize(13);
+    doc.text(`Compiled for: ${aliases}`, pageWidth / 2, titleY + 6, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text(`${conversations.length} Conversations`, pageWidth / 2, pageHeight * 0.65, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+
+    const totalConvs = conversations.length;
+    for (let c = 0; c < totalConvs; c++) {
+      const conv = conversations[c];
+      const pct = Math.floor((c / totalConvs) * 90);
+      onProgress(10 + pct, `Processing ${c + 1}/${totalConvs}: ${conv.name}`);
+      await new Promise(r => setTimeout(r, 0));
+
+      // Conversation header page
+      addPage();
+      doc.setFont(font, 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(0, 0, 0);
+      const nameLines = doc.splitTextToSize(conv.name, textWidth);
+      nameLines.forEach(line => { checkY(10); doc.text(line, margin, y); y += 9; });
+
+      doc.setFont(font, 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(80, 80, 80);
+      doc.text(`${conv.total} messages  •  ${formatDateForDisplay(conv.firstMsg)} – ${formatDateForDisplay(conv.lastMsg)}`, margin, y);
+      y += 5;
+      doc.setDrawColor(180, 180, 180);
+      doc.setLineWidth(0.3);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 7;
+      doc.setTextColor(0, 0, 0);
+
+      const msgs = conv.messages || [];
+      let currentDateStr = '';
+
+      for (let m = 0; m < msgs.length; m++) {
+        const msg = msgs[m].msg || msgs[m];
+        if (!msg || (msg.timestamp === 0 && msg.dateStr === '')) continue;
+
+        // Date separator
+        const msgDateStr = formatDateForDisplay(msg.timestamp);
+        if (msgDateStr !== currentDateStr) {
+          currentDateStr = msgDateStr;
+          checkY(10);
+          y += 3;
+          doc.setFont(font, 'bold');
+          doc.setFontSize(9);
+          doc.setTextColor(100, 100, 100);
+          doc.text(`── ${msgDateStr} ──`, pageWidth / 2, y, { align: 'center' });
+          y += 6;
+          doc.setTextColor(0, 0, 0);
+        }
+
+        const sender = getMappedName(msg.sender, data.aliasMap);
+        const isMe = isMyMessageFast(msg.sender, myNamesLower, data.aliasMap);
+        const timeStr = formatTimeForDisplay(msg.timestamp);
+
+        let msgText = String(msg.content || '[Media]')
+          .replace(/\p{Extended_Pictographic}/gu, '')
+          .replace(/[\uFE00-\uFEFF\u200B-\u200F\u2028-\u202F]/g, '');
+
+        // Sender + time line
+        doc.setFont(font, 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(isMe ? 30 : 60, isMe ? 80 : 60, isMe ? 160 : 60);
+        checkY(8);
+        doc.text(`${sender}  ${timeStr}`, isMe ? pageWidth - margin : margin, y, { align: isMe ? 'right' : 'left' });
+        y += 4.5;
+        doc.setTextColor(0, 0, 0);
+
+        // Message text
+        doc.setFont(font, 'normal');
+        doc.setFontSize(10);
+        const msgLines = doc.splitTextToSize(msgText, textWidth * 0.8);
+        msgLines.forEach(line => {
+          checkY(lineH);
+          doc.text(line, isMe ? pageWidth - margin : margin, y, { align: isMe ? 'right' : 'left' });
+          y += lineH;
+        });
+        y += 2;
+
+        if (m % 500 === 0) await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    // Page numbers
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let p = 2; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFont(font, 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`${p}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+    }
+
+    onProgress(98, 'Saving...');
+    await new Promise(r => setTimeout(r, 50));
+    const filename = `${(ebookName || 'Ebook').replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, '_')}_simple.pdf`;
+    doc.save(filename);
+    onProgress(100, 'Download started!');
+  } catch (err) {
+    console.error('Simple PDF generation error:', err);
+    throw err;
+  }
+}
+
 export async function generateEbookPdf(data, onProgress) {
   _urduImageCache.clear(); // Clear cache from previous generation
+  if (data.pdfStyle === 'simple') {
+    return generateSimplePdf(data, onProgress);
+  }
   try {
     const doc = new jsPDF({ format: 'a4', unit: 'mm' });
     const { ebookName, aliases, conversations, fontFamily } = data;

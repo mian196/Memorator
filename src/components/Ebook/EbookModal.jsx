@@ -19,6 +19,7 @@ export default function EbookModal() {
   const [convLimit, setConvLimit] = useState('all'); // 'all', '10', '20', '50', '100', '200', 'custom'
   const [customLimit, setCustomLimit] = useState('');
   const [fontFamily, setFontFamily] = useState('times');
+  const [pdfStyle, setPdfStyle] = useState('themed'); // 'themed' or 'simple'
   const [pdfTheme, setPdfTheme] = useState('light');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -174,6 +175,7 @@ export default function EbookModal() {
         myNames,
         aliasMap,
         fontFamily,
+        pdfStyle,
         theme: pdfTheme
       };
 
@@ -222,22 +224,48 @@ export default function EbookModal() {
           </div>
         </div>
 
-        {/* PDF Theme */}
-        <h3>🎨 PDF Theme</h3>
+        {/* PDF Style */}
+        <h3>🖨️ PDF Style</h3>
         <div className="ebook-toggle-row">
           <button
-            className={`ebook-toggle-btn ${pdfTheme === 'light' ? 'active' : ''}`}
-            onClick={() => setPdfTheme('light')}
+            className={`ebook-toggle-btn ${pdfStyle === 'themed' ? 'active' : ''}`}
+            onClick={() => setPdfStyle('themed')}
           >
-            Light Mode
+            💬 Chat Bubbles
           </button>
           <button
-            className={`ebook-toggle-btn ${pdfTheme === 'dark' ? 'active' : ''}`}
-            onClick={() => setPdfTheme('dark')}
+            className={`ebook-toggle-btn ${pdfStyle === 'simple' ? 'active' : ''}`}
+            onClick={() => setPdfStyle('simple')}
           >
-            Dark Mode
+            📄 Simple Text
           </button>
         </div>
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+          {pdfStyle === 'themed'
+            ? 'Blue/grey chat bubbles matching the app theme.'
+            : 'Plain black-on-white text — smaller file, faster generation.'}
+        </div>
+
+        {/* PDF Theme — only relevant for themed style */}
+        {pdfStyle === 'themed' && (
+          <>
+            <h3>🎨 PDF Theme</h3>
+            <div className="ebook-toggle-row">
+              <button
+                className={`ebook-toggle-btn ${pdfTheme === 'light' ? 'active' : ''}`}
+                onClick={() => setPdfTheme('light')}
+              >
+                Light Mode
+              </button>
+              <button
+                className={`ebook-toggle-btn ${pdfTheme === 'dark' ? 'active' : ''}`}
+                onClick={() => setPdfTheme('dark')}
+              >
+                Dark Mode
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Sort Order */}
         <h3>📊 Sort Order</h3>
