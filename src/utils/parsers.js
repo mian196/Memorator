@@ -48,7 +48,9 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
     if (contentText) {
       messages.push({
         threadName, sender, content: contentText, dateStr,
-        timestamp: parseTimestamp(dateStr), reactions: [], _source: 'HTML (' + (filePath ? filePath.split('/').slice(-2).join('/') : 'Unknown') + ')'
+        timestamp: parseTimestamp(dateStr), reactions: [],
+        _platform: 'Messenger',
+        _source: 'HTML (' + (filePath ? filePath.split('/').slice(-2).join('/') : 'Unknown') + ')'
       });
     }
   });
@@ -104,7 +106,9 @@ export function parseJSON(text, filePath, myNames, fileRegistry) {
     if (content || (msg.media && msg.media.length > 0)) {
       messages.push({
         threadName, sender, content: content || '[Media]', dateStr,
-        timestamp, reactions, _source: 'JSON (' + displayPath + ')'
+        timestamp, reactions,
+        _platform: 'Messenger',
+        _source: 'JSON (' + displayPath + ')'
       });
     }
   });
@@ -113,7 +117,7 @@ export function parseJSON(text, filePath, myNames, fileRegistry) {
 }
 
 // --- WhatsApp TXT Parser ---
-export function parseWhatsAppTXT(text, filename, myNames) {
+export function parseWhatsAppTXT(text, filename, myNames, dateFormat = 'auto') {
   const messages = [];
   let rawName = filename.replace('.txt', '').replace(/^WhatsApp Chat with /i, '').trim();
   let threadName = cleanThreadName(rawName, [], myNames);
@@ -121,18 +125,23 @@ export function parseWhatsAppTXT(text, filename, myNames) {
   const lines = text.split(/\r?\n/);
   const messageRegex = /^\[?(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}[, ]+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?)\]?\s*[\-]?\s*([^:]+):\s*(.*)$/;
 
+  // Use user-specified date format if not 'auto', otherwise auto-detect
   let currentDateOrder = null;
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(messageRegex);
-    if (match) {
-      const dMatch = match[1].match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
-      if (dMatch) {
-        const p1 = parseInt(dMatch[1], 10);
-        const p2 = parseInt(dMatch[2], 10);
-        if (p1 > 12 && p2 <= 12) {
-          currentDateOrder = 'DMY'; break;
-        } else if (p1 <= 12 && p2 > 12) {
-          currentDateOrder = 'MDY'; break;
+  if (dateFormat === 'DMY' || dateFormat === 'MDY') {
+    currentDateOrder = dateFormat;
+  } else {
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(messageRegex);
+      if (match) {
+        const dMatch = match[1].match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+        if (dMatch) {
+          const p1 = parseInt(dMatch[1], 10);
+          const p2 = parseInt(dMatch[2], 10);
+          if (p1 > 12 && p2 <= 12) {
+            currentDateOrder = 'DMY'; break;
+          } else if (p1 <= 12 && p2 > 12) {
+            currentDateOrder = 'MDY'; break;
+          }
         }
       }
     }
@@ -159,10 +168,12 @@ export function parseWhatsAppTXT(text, filename, myNames) {
         threadName, sender, dateStr,
         timestamp: parseTimestamp(dateStr, currentDateOrder),
         content: match[3].trim(),
-        reactions: [], _source: 'TXT (' + filename + ')'
+        reactions: [],
+        _platform: 'WhatsApp',
+        _source: 'TXT (' + filename + ')'
       };
     } else {
-      if (currentMsg && line.trim() !== '') currentMsg.content += '\n' + line.trim();
+      if (currentMsg && line.trim() !== '') currentMsg.content += '\n' + line;
     }
   });
   if (currentMsg) messages.push(currentMsg);
@@ -183,7 +194,10 @@ export function parseNDJSON(text, filename, myNames) {
       let threadName = cleanThreadName(rawThreadName, [], myNames);
 
       let sender = 'Unknown';
-      if (data.type === '2') {
+      // Android Telephony API: only type 2 = sent. Types 1,3,4,5,6 are not sent.
+      const smsType = String(data.type);
+      const isSent = smsType === '2';
+      if (isSent) {
         sender = myNames.length > 0 ? myNames[0] : 'Me';
       } else {
         sender = data.__display_name || data.address || 'Unknown';
@@ -196,7 +210,9 @@ export function parseNDJSON(text, filename, myNames) {
       if (content) {
         messages.push({
           threadName, sender, content, dateStr,
-          timestamp, reactions: [], _source: 'NDJSON (' + filename + ')'
+          timestamp, reactions: [],
+          _platform: 'SMS',
+          _source: 'NDJSON (' + filename + ')'
         });
       }
     } catch (e) { /* skip invalid lines */ }
@@ -218,9 +234,11 @@ export function parseSMSJSON(text, filename, myNames) {
     const rawAddress = sms.address || 'Unknown SMS';
     const threadName = cleanThreadName(rawAddress, [], myNames);
 
-    // type 2 = sent, type 1 = received
+    // Android Telephony API: only type 2 = sent. Types 1,3,4,5,6 are not sent.
     let sender;
-    if (sms.type === 2 || sms.type === '2') {
+    const smsType = String(sms.type);
+    const isSent = smsType === '2';
+    if (isSent) {
       sender = myNames.length > 0 ? myNames[0] : 'Me';
     } else {
       sender = rawAddress;
@@ -233,7 +251,9 @@ export function parseSMSJSON(text, filename, myNames) {
     if (content) {
       messages.push({
         threadName, sender, content, dateStr,
-        timestamp, reactions: [], _source: 'SMS JSON (' + filename + ')'
+        timestamp, reactions: [],
+        _platform: 'SMS',
+        _source: 'SMS JSON (' + filename + ')'
       });
     }
   });
