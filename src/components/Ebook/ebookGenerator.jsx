@@ -101,60 +101,84 @@ async function ensureUrduFont() {
 }
 
 /**
- * Render Urdu text to an offscreen canvas and return image data.
- * Uses JPEG compression + caching for minimal file size.
- * @returns {{ dataUrl: string, widthMm: number, heightMm: number }}
+ * Render text (Urdu or emoji) to an offscreen canvas and return image data.
+ * bgColor: CSS color string for background (default white for light, bubble color for dark).
+ * fgColor: CSS color string for text (default black).
  */
-const _urduImageCache = new Map();
+const _canvasImageCache = new Map();
 
-function renderUrduToImage(text, fontSizePt, bold = false) {
-  // Cache key: text + size + bold
-  const cacheKey = `${text}|${fontSizePt}|${bold}`;
-  if (_urduImageCache.has(cacheKey)) return _urduImageCache.get(cacheKey);
+function renderToImage(text, fontSizePt, { bold = false, bgColor = '#FFFFFF', fgColor = '#000000', isUrduText = false } = {}) {
+  const cacheKey = `${text}|${fontSizePt}|${bold}|${bgColor}|${fgColor}`;
+  if (_canvasImageCache.has(cacheKey)) return _canvasImageCache.get(cacheKey);
 
-  const scale = 2; // 2x DPI (good quality, 4x smaller than scale=4)
-  const fontSizePx = fontSizePt * 1.333 * scale; // pt to px, scaled
+  const scale = 2;
+  const fontSizePx = fontSizePt * 1.333 * scale;
   const fontWeight = bold ? '700' : '400';
-  const fontFamily = "'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif";
+  const canvasFontFamily = isUrduText
+    ? "'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif"
+    : "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  ctx.font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
+  ctx.font = `${fontWeight} ${fontSizePx}px ${canvasFontFamily}`;
 
-  // Measure text
   const metrics = ctx.measureText(text);
   const textW = metrics.width;
-  // For Nastaliq script, ascent/descent is very large (tall curved strokes)
-  const textH = fontSizePx * 2.4;
+  // Urdu Nastaliq needs tall canvas; emoji needs ~1.4x line height
+  const textH = isUrduText ? fontSizePx * 2.4 : fontSizePx * 1.5;
 
   canvas.width = Math.ceil(textW) + 8;
   canvas.height = Math.ceil(textH) + 8;
 
-  // Re-set font after resize (canvas reset clears context state)
-  ctx.font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  // White background for JPEG (no transparency needed)
-  ctx.fillStyle = '#FFFFFF';
+  ctx.font = `${fontWeight} ${fontSizePx}px ${canvasFontFamily}`;
+  ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = fgColor;
   ctx.textBaseline = 'middle';
-  ctx.direction = 'rtl'; // Enable RTL for correct rendering
 
-  // Draw text — position slightly below center to accommodate tall ascenders
-  ctx.fillText(text, canvas.width - 4, canvas.height * 0.55);
+  if (isUrduText) {
+    ctx.direction = 'rtl';
+    ctx.fillText(text, canvas.width - 4, canvas.height * 0.55);
+  } else {
+    ctx.fillText(text, 4, canvas.height * 0.55);
+  }
 
-  // Convert to mm (jsPDF uses mm). 1 inch = 25.4mm, 1 inch = 96px (CSS)
   const pxToMm = 25.4 / 96;
   const widthMm = (canvas.width / scale) * pxToMm;
   const heightMm = (canvas.height / scale) * pxToMm;
 
-  const result = {
-    dataUrl: canvas.toDataURL('image/jpeg', 0.6), // JPEG at 60% quality (much smaller than PNG)
-    widthMm,
-    heightMm,
-  };
-
-  _urduImageCache.set(cacheKey, result);
+  const result = { dataUrl: canvas.toDataURL('image/jpeg', 0.75), widthMm, heightMm };
+  _canvasImageCache.set(cacheKey, result);
   return result;
+}
+
+
+// Regex to detect emoji characters
+const EMOJI_RE = /\p{Extended_Pictographic}/u;
+
+/**
+ * Split a string into alternating runs of emoji and non-emoji text.
+ * Returns array of { text, isEmoji }
+ */
+function splitEmojiSegments(str) {
+  const segments = [];
+  // Match sequences: emoji (with optional ZWJ/variation sequences) vs plain text
+  const re = /(\p{Extended_Pictographic}(?:\uFE0F)?(?:\u20E3)?(?:[\u200D]\p{Extended_Pictographic}(?:\uFE0F)?)*)/gu;
+  let last = 0, m;
+  while ((m = re.exec(str)) !== null) {
+    if (m.index > last) segments.push({ text: str.slice(last, m.index), isEmoji: false });
+    segments.push({ text: m[0], isEmoji: true });
+    last = re.lastIndex;
+  }
+  if (last < str.length) segments.push({ text: str.slice(last), isEmoji: false });
+  return segments.filter(s => s.text.length > 0);
+}
+
+/**
+ * Returns true if the string contains any emoji.
+ */
+function hasEmoji(str) {
+  return EMOJI_RE.test(str);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -290,8 +314,7 @@ async function generateSimplePdf(data, onProgress) {
         const timeStr = formatTimeForDisplay(msg.timestamp);
 
         let msgText = String(msg.content || '[Media]')
-          .replace(/\p{Extended_Pictographic}/gu, '')
-          .replace(/[\uFE00-\uFEFF\u200B-\u200F\u2028-\u202F]/g, '');
+          .replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFFFC\uFFFD]/g, '');
 
         // Sender + time line
         doc.setFont(font, 'bold');
@@ -364,9 +387,7 @@ export async function generateEbookPdf(data, onProgress) {
     let _currentDateStr = '';
     let _inMessages = false; // Only show header on message pages
     
-    // Per-page date tracking for date range headers
-    let _pageFirstDate = '';
-    let _pageLastDate = '';
+    // Per-page date tracking for date range headers (used retroactively in page number pass)
     
     // Fill page background for dark mode
     const fillPageBg = () => {
@@ -435,33 +456,65 @@ export async function generateEbookPdf(data, onProgress) {
     await new Promise(r => setTimeout(r, 50));
 
     /**
-     * Smart text renderer: uses canvas-image for Urdu, native doc.text for English.
-     * @param {string} text 
-     * @param {number} x - x position in mm
-     * @param {number} yPos - y position in mm
-     * @param {object} options - { align, fontStyle, fontSize, color }
+     * Smart text renderer: canvas-image for Urdu/emoji, native doc.text for plain text.
+     * bgColor: bubble background color for emoji canvas so it blends in (default white).
+     * fgColor: text color for emoji canvas (default black).
      */
     const smartText = (text, x, yPos, options = {}) => {
       if (!text || !text.trim()) return;
-      
+      const currentFontSize = options.fontSize || doc.getFontSize();
+      const bold = options.fontStyle === 'bold';
+
+      // Urdu: render entire string as one canvas image
       if (isUrdu(text) && _urduFontReady) {
-        const currentFontSize = options.fontSize || doc.getFontSize();
-        const bold = options.fontStyle === 'bold';
-        const img = renderUrduToImage(text, currentFontSize, bold);
-        
-        // Handle alignment
+        const img = renderToImage(text, currentFontSize, { bold, bgColor: options.bgColor || '#FFFFFF', fgColor: options.fgColor || '#000000', isUrduText: true });
         let imgX = x;
-        if (options.align === 'center') {
-          imgX = x - img.widthMm / 2;
-        } else if (options.align === 'right') {
-          imgX = x - img.widthMm;
-        }
-        
-        // Adjust y — push image UP so Nastaliq descenders don't overlap next line
+        if (options.align === 'center') imgX = x - img.widthMm / 2;
+        else if (options.align === 'right') imgX = x - img.widthMm;
         const yOffset = img.heightMm * 0.45;
-        doc.addImage(img.dataUrl, 'PNG', imgX, yPos - yOffset, img.widthMm, img.heightMm);
-      } else {
+        doc.addImage(img.dataUrl, 'JPEG', imgX, yPos - yOffset, img.widthMm, img.heightMm);
+        return;
+      }
+
+      // If no emoji, use native doc.text directly
+      if (!hasEmoji(text)) {
         doc.text(text, x, yPos, options);
+        return;
+      }
+
+      // Mixed text+emoji: render segments left-to-right, advancing x
+      // For center/right aligned lines, first compute total width to find start x
+      const segments = splitEmojiSegments(text);
+      const bg = options.bgColor || '#FFFFFF';
+      const fg = options.fgColor || '#000000';
+
+      // Measure total width for alignment
+      let totalW = 0;
+      const measured = segments.map(seg => {
+        if (seg.isEmoji) {
+          const img = renderToImage(seg.text, currentFontSize, { bgColor: bg, fgColor: fg });
+          totalW += img.widthMm;
+          return { ...seg, img };
+        } else {
+          const w = doc.getTextWidth(seg.text);
+          totalW += w;
+          return { ...seg, w };
+        }
+      });
+
+      let curX = x;
+      if (options.align === 'center') curX = x - totalW / 2;
+      else if (options.align === 'right') curX = x - totalW;
+
+      for (const seg of measured) {
+        if (seg.isEmoji) {
+          const yOffset = seg.img.heightMm * 0.3;
+          doc.addImage(seg.img.dataUrl, 'JPEG', curX, yPos - yOffset, seg.img.widthMm, seg.img.heightMm);
+          curX += seg.img.widthMm;
+        } else {
+          doc.text(seg.text, curX, yPos);
+          curX += seg.w;
+        }
       }
     };
 
@@ -650,20 +703,11 @@ export async function generateEbookPdf(data, onProgress) {
          const timeStr = `${formatTimeForDisplay(msg.timestamp)} @ ${plat}`;
          
          let msgText = String(msg.content || '[Media omitted]');
-         
-         // Strip emojis that jsPDF fonts can't render (per EXPORT-01)
-         msgText = msgText.replace(/\p{Extended_Pictographic}/gu, '')
-                          .replace(/[\uFE00-\uFE0F]/g, '')    // Variation selectors
-                          .replace(/[\u200D]/g, '')             // Zero-width joiner
-                          .replace(/[\u200B-\u200F]/g, '')      // Zero-width spaces and marks
-                          .replace(/[\u2028-\u202F]/g, '')      // Line/paragraph separators
-                          .replace(/[\u2060-\u206F]/g, '')      // Word joiners, invisible operators
-                          .replace(/[\uFFFC\uFFFD]/g, '')       // Object replacement, replacement char
-                          .replace(/[\u20E3]/g, '')              // Combining enclosing keycap
-                          .replace(/[\uFE00-\uFEFF]/g, '')      // Specials block
-                          .replace(/\*\*(.*?)\*\*/g, '$1')      // Bold markdown
-                          .replace(/\*(.*?)\*/g, '$1')           // Italic markdown
-                          .replace(/~~(.*?)~~/g, '$1');          // Strikethrough markdown
+         // Strip invisible control chars and markdown syntax only — emoji rendered via canvas
+         msgText = msgText.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFFFC\uFFFD]/g, '')
+                          .replace(/\*\*(.*?)\*\*/g, '$1')
+                          .replace(/\*(.*?)\*/g, '$1')
+                          .replace(/~~(.*?)~~/g, '$1');
          
          doc.setFontSize(11);
          const senderText = `${sender}: `;
@@ -751,6 +795,9 @@ export async function generateEbookPdf(data, onProgress) {
          const isMe = isMyMessageFast(msg.sender, myNamesLower, data.aliasMap);
          const bubbleBg = isMe ? theme.sentBubbleBg : theme.receivedBubbleBg;
          const bubbleBorder = isMe ? theme.sentBubbleBorder : theme.receivedBubbleBorder;
+         // CSS color strings for canvas emoji rendering — must match bubble background
+         const bubbleBgCss = `rgb(${bubbleBg[0]},${bubbleBg[1]},${bubbleBg[2]})`;
+         const bubbleFgCss = `rgb(${theme.textMain[0]},${theme.textMain[1]},${theme.textMain[2]})`;
 
          // Measure bubble content width and height
          doc.setFont(font, "normal");
@@ -792,7 +839,7 @@ export async function generateEbookPdf(data, onProgress) {
          doc.setTextColor(...theme.textMain);
          for (let l = 0; l < lines.length; l++) {
             const lineSpacing = isUrdu(lines[l]) ? 9 : lineH;
-            smartText(lines[l] || '', textX, bY, { fontSize: 11 });
+            smartText(lines[l] || '', textX, bY, { fontSize: 11, bgColor: bubbleBgCss, fgColor: bubbleFgCss });
             bY += lineSpacing;
          }
 
