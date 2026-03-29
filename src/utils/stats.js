@@ -1,6 +1,6 @@
 import { getMappedName, isExcluded, formatDuration, isMyMessageFast } from './helpers';
 
-export function recalculateChats(messages, media, myNames, excludeNames, aliasMap) {
+export function recalculateChats(messages, media, myNames, excludeNames, aliasMap, wordEffects = []) {
   const chats = {};
   let validMsgCount = 0;
   const effectiveMyNames = myNames.length > 0 ? myNames : ['Me'];
@@ -60,6 +60,14 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
     const mappedSender = getMappedName(m.sender, aliasMap);
     if (isExcluded(mappedThread, mappedSender, excludeNames)) return;
     if (chats[mappedThread]) chats[mappedThread].mediaCount++;
+  });
+
+  wordEffects.forEach(we => {
+    const mappedThread = getMappedName(we.threadName, aliasMap);
+    if (chats[mappedThread]) {
+      if (!chats[mappedThread].wordEffects) chats[mappedThread].wordEffects = [];
+      chats[mappedThread].wordEffects.push(we);
+    }
   });
 
   for (const [name, chat] of Object.entries(chats)) {

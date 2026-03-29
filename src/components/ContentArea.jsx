@@ -15,7 +15,7 @@ export default function ContentArea() {
   const debounceRef = useRef(null);
   const chatContainerRef = useRef(null);
 
-  const { activeView, activeChatName, chats, messages, media, myNames, excludeNames, aliasMap, chatLimit, mediaLimit, activeChatTab } = state;
+  const { activeView, activeChatName, chats, messages, media, myNames, excludeNames, aliasMap, chatLimit, mediaLimit, activeChatTab, wordEffects } = state;
 
   // --- Search logic ---
   const handleSearchInput = useCallback((e) => {
@@ -117,13 +117,19 @@ export default function ContentArea() {
 
   // Title
   const getTitle = () => {
-    if (['chat', 'chatMedia', 'chatStats', 'chatManage'].includes(activeView)) return activeChatName || 'Chat';
+    if (['chat', 'chatMedia', 'chatStats', 'chatManage', 'chatWordEffects'].includes(activeView)) return activeChatName || 'Chat';
     if (activeView === 'directory') return 'Chat Directory';
     return 'Global Search Results';
   };
 
+  // Word effects for active chat
+  const chatWordEffects = useMemo(() => {
+    if (!activeChatName || !chatData) return [];
+    return chatData.wordEffects || [];
+  }, [activeChatName, chatData]);
+
   // Show chat tabs?
-  const showChatTabs = ['chat', 'chatMedia', 'chatStats', 'chatManage'].includes(activeView);
+  const showChatTabs = ['chat', 'chatMedia', 'chatStats', 'chatManage', 'chatWordEffects'].includes(activeView);
 
   // --- Directory data ---
   const getFilteredChats = () => {
@@ -209,6 +215,12 @@ export default function ContentArea() {
             className={`tab ${activeChatTab === 'manage' ? 'active' : ''}`}
             onClick={() => { dispatch({ type: 'SET_CHAT_TAB', payload: 'manage' }); dispatch({ type: 'SET_VIEW', payload: 'chatManage' }); }}
           >⚙️ Manage Data</button>
+          {chatWordEffects.length > 0 && (
+            <button
+              className={`tab ${activeChatTab === 'wordEffects' ? 'active' : ''}`}
+              onClick={() => { dispatch({ type: 'SET_CHAT_TAB', payload: 'wordEffects' }); dispatch({ type: 'SET_VIEW', payload: 'chatWordEffects' }); }}
+            >✨ Word Effects ({chatWordEffects.length})</button>
+          )}
         </div>
       )}
 
@@ -491,6 +503,25 @@ export default function ContentArea() {
               </div>
             </div>
 
+          </div>
+        </div>
+
+        {/* Word Effects View */}
+        <div className={`view-section ${activeView === 'chatWordEffects' ? 'active' : ''}`}>
+          <div style={{ overflowY: 'auto', height: '100%', padding: '1rem' }}>
+            {chatWordEffects.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>No word effects found for this chat.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                {chatWordEffects.map((we, i) => (
+                  <div key={i} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: '1.4rem', marginBottom: '0.4rem' }}>{we.effect}</div>
+                    <div style={{ fontWeight: 'bold', color: 'var(--accent-primary)', marginBottom: '0.2rem', wordBreak: 'break-word' }}>{we.word}</div>
+                    {we.createdAt && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{we.createdAt}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

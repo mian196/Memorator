@@ -4,6 +4,7 @@ import { cleanThreadName, parseTimestamp } from './helpers';
 export function parseHTML(html, filePath, myNames, fileRegistry) {
   const messages = [];
   const media = [];
+  const wordEffects = [];
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
 
@@ -66,6 +67,21 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
     // Skip any section without a sender h2 — real messages always have one.
     // Word effects, system metadata, and other non-message sections have no h2.
     if (!senderEl) return;
+
+    // Word effects sections: sender h2 = "Word effects", no footer, content = metadata text
+    if (senderEl.textContent.trim() === 'Word effects') {
+      const rawText = sec.textContent || '';
+      const wordMatch = rawText.match(/Word:\s*(.+?)(?=Animation effect:|Creation time:|$)/i);
+      const effectMatch = rawText.match(/Animation effect:\s*(.+?)(?=Creation time:|$)/i);
+      const timeMatch = rawText.match(/Creation time:\s*(.+?)(?:\n|$)/i);
+      const word = wordMatch ? wordMatch[1].trim() : '';
+      const effect = effectMatch ? effectMatch[1].trim() : '';
+      const createdAt = timeMatch ? timeMatch[1].trim() : '';
+      if (word || effect) {
+        wordEffects.push({ threadName, word, effect, createdAt, _source: source });
+      }
+      return;
+    }
     // Content: try known class first, then any div between h2 and footer
     let contentEl = sec.querySelector('._a6-p');
     if (!contentEl) {
@@ -133,7 +149,7 @@ export function parseHTML(html, filePath, myNames, fileRegistry) {
     }
   });
 
-  return { messages, media, participants: Array.from(participantSet), generatedBy };
+  return { messages, media, wordEffects, participants: Array.from(participantSet), generatedBy };
 }
 
 // Decode Facebook's broken UTF-8 encoding (Latin-1 bytes stored as Unicode code points)
