@@ -7,7 +7,15 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
   const myNamesLower = effectiveMyNames.map(n => n.toLowerCase());
 
   messages.forEach(msg => {
-    const mappedThread = getMappedName(msg.threadName, aliasMap);
+    let mappedThread = getMappedName(msg.threadName, aliasMap);
+    // Strip owner name from thread names like "Facebook user, Simon Riley" → "Facebook user (id)"
+    // This happens when myNames was empty at parse time so owner wasn't filtered out
+    if (mappedThread.includes(',')) {
+      const parts = mappedThread.split(',').map(s => s.trim()).filter(p => !myNamesLower.includes(p.toLowerCase()));
+      if (parts.length > 0 && parts.length < mappedThread.split(',').length) {
+        mappedThread = parts.join(', ');
+      }
+    }
     const mappedSender = getMappedName(msg.sender, aliasMap);
     if (isExcluded(mappedThread, mappedSender, excludeNames)) return;
 

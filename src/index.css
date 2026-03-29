@@ -100,6 +100,12 @@ body {
   color: var(--text-main); padding: 8px; border-radius: 4px;
   margin-top: 5px; font-size: 0.85rem; font-family: inherit; resize: vertical;
 }
+select.sidebar-input {
+  background: var(--panel-bg); cursor: pointer; appearance: auto;
+}
+select.sidebar-input option {
+  background: var(--panel-bg); color: var(--text-main); padding: 6px;
+}
 
 /* Stats Grid */
 .stats-grid {
@@ -277,6 +283,33 @@ body {
 .bubble-sender { display: block; font-size: 0.8rem; font-weight: bold; margin-bottom: 2px; color: var(--accent-secondary); }
 .reaction-container { margin-top: 5px; font-size: 0.85rem; display: flex; gap: 4px; }
 .reaction-badge { background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 10px; }
+
+/* Chat Controls */
+.chat-controls {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 16px; background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--border-color); gap: 10px; flex-wrap: wrap;
+}
+.chat-controls-left, .chat-controls-right {
+  display: flex; align-items: center; gap: 6px;
+}
+.chat-order-btn {
+  padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border-color);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 0.78rem; transition: all 0.15s;
+}
+.chat-order-btn.active {
+  background: var(--accent-primary); color: white; border-color: var(--accent-primary);
+}
+.chat-order-btn:hover:not(.active) { background: rgba(255,255,255,0.05); }
+.chat-jump-btn {
+  font-size: 0.78rem !important; padding: 5px 12px !important;
+  border-radius: 14px !important; background: rgba(255,255,255,0.08) !important;
+}
+.chat-jump-btn:hover { background: rgba(255,255,255,0.15) !important; }
+.chat-msg-count {
+  font-size: 0.75rem; color: var(--text-muted); padding: 0 4px;
+}
 
 /* Media Gallery */
 .gallery-grid {

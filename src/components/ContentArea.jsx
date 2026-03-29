@@ -10,6 +10,8 @@ export default function ContentArea() {
   const { state, dispatch } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [newestFirst, setNewestFirst] = useState(true);
+  const [viewEnd, setViewEnd] = useState(false); // false = show from start of sorted list, true = show from end
   const debounceRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -41,14 +43,18 @@ export default function ContentArea() {
   // --- Chat data ---
   const chatData = activeChatName ? chats[activeChatName] : null;
 
-  // Auto-scroll chat
+  // Auto-scroll chat — always scroll to top (first visible message)
+  // Both modes show messages in display order: newest-first or oldest-first
+  // User scrolls DOWN to load more in both cases
   useEffect(() => {
     if (activeView === 'chat' && chatContainerRef.current) {
       setTimeout(() => {
-        if (chatContainerRef.current) chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = 0;
+        }
       }, 50);
     }
-  }, [activeView, activeChatName, chatLimit]);
+  }, [activeView, activeChatName, newestFirst]);
 
   // --- Export functions ---
   const exportTxt = useCallback(() => {
@@ -254,49 +260,90 @@ export default function ContentArea() {
 
         {/* Chat View */}
         <div className={`view-section ${activeView === 'chat' ? 'active' : ''}`}>
-          {chatData && chatData.list.length > chatLimit && (
-            <button className="btn-load-more" onClick={() => dispatch({ type: 'LOAD_MORE_CHAT' })}>
-              Load Older Messages
-            </button>
+          {/* Chat controls bar */}
+          {chatData && (
+            <div className="chat-controls">
+              <div className="chat-controls-left">
+                <button
+                  className={`chat-order-btn ${newestFirst ? 'active' : ''}`}
+                  onClick={() => { setNewestFirst(true); setViewEnd(false); dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 }); }}
+                  title="Newest messages first (scroll down for older)"
+                >
+                  Newest First
+                </button>
+                <button
+                  className={`chat-order-btn ${!newestFirst ? 'active' : ''}`}
+                  onClick={() => { setNewestFirst(false); setViewEnd(false); dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 }); }}
+                  title="Oldest messages first (scroll down for newer)"
+                >
+                  Oldest First
+                </button>
+              </div>
+              <div className="chat-controls-right">
+                <button
+                  className="btn chat-jump-btn"
+                  onClick={() => {
+                    setViewEnd(false);
+                    dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 });
+                    setTimeout(() => {
+                      if (chatContainerRef.current) chatContainerRef.current.scrollTop = 0;
+                    }, 50);
+                  }}
+                  title={newestFirst ? "Jump to the most recent messages" : "Jump to the very first message"}
+                >
+                  {newestFirst ? "Jump to Latest" : "Jump to First"}
+                </button>
+                <button
+                  className="btn chat-jump-btn"
+                  onClick={() => {
+                    setViewEnd(true);
+                    dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 });
+                    setTimeout(() => {
+                      if (chatContainerRef.current) {
+                        // When viewEnd=true in oldest-first: last slice = latest msgs, scroll to bottom so newest is visible
+                        // When viewEnd=true in newest-first: last slice = oldest msgs, scroll to top
+                        if (!newestFirst) {
+                          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+                        } else {
+                          chatContainerRef.current.scrollTop = 0;
+                        }
+                      }
+                    }, 100);
+                  }}
+                  title={newestFirst ? "Jump to the oldest messages" : "Jump to the most recent messages"}
+                >
+                  {newestFirst ? "Jump to First" : "Jump to Latest"}
+                </button>
+                <span className="chat-msg-count">{chatData.total.toLocaleString()} msgs</span>
+              </div>
+            </div>
           )}
+
           <div className="chat-view" ref={chatContainerRef}>
             {chatData && (() => {
-              const visibleMsgs = chatData.list.slice(-chatLimit);
+              const sortedList = [...chatData.list]
+                .filter(m => !isExcluded(getMappedName(m.threadName, aliasMap), getMappedName(m.sender, aliasMap), excludeNames))
+                .sort((a, b) => {
+                  // Push zero-timestamp messages to the end regardless of sort order
+                  const aTs = a.timestamp || 0;
+                  const bTs = b.timestamp || 0;
+                  if (aTs === 0 && bTs === 0) return 0;
+                  if (aTs === 0) return 1;
+                  if (bTs === 0) return -1;
+                  const diff = aTs - bTs;
+                  return newestFirst ? -diff : diff;
+                });
+              // viewEnd=false: show from start of sorted list (default)
+              // viewEnd=true: show from end of sorted list (jump to other end)
+              const visibleMsgs = viewEnd
+                ? sortedList.slice(-chatLimit)
+                : sortedList.slice(0, chatLimit);
+              // When viewEnd=true we're already showing the tail — no more to load in that direction
+              const hasMore = !viewEnd && sortedList.length > chatLimit;
+              const remaining = sortedList.length - chatLimit;
               const myNamesLower = myNames.map(n => n.toLowerCase());
-              const ChatRow = ({ index, style }) => {
-                const msg = visibleMsgs[index];
-                const mappedSender = getMappedName(msg.sender, aliasMap);
-                const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
-                return (
-                  <div style={style}>
-                    <div className={`chat-bubble ${isMe ? 'sent' : 'received'}`}>
-                      {!isMe && <span className="bubble-sender">{mappedSender}</span>}
-                      {msg.content}
-                      {msg.reactions && msg.reactions.length > 0 && (
-                        <div className="reaction-container">
-                          {msg.reactions.map((r, j) => (
-                            <span key={j} className="reaction-badge">{r}</span>
-                          ))}
-                        </div>
-                      )}
-                      <span className="bubble-date">{msg.dateStr}</span>
-                    </div>
-                  </div>
-                );
-              };
-              // Use virtualized list for large chats, regular render for small ones
-              if (visibleMsgs.length > 200) {
-                return (
-                  <VirtualList
-                    rowCount={visibleMsgs.length}
-                    rowHeight={80}
-                    rowComponent={ChatRow}
-                    rowProps={{}}
-                    style={{ height: 600, width: "100%" }}
-                  />
-                );
-              }
-              return visibleMsgs.map((msg, i) => {
+
+              const msgElements = visibleMsgs.map((msg, i) => {
                 const mappedSender = getMappedName(msg.sender, aliasMap);
                 const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
                 return (
@@ -314,6 +361,16 @@ export default function ContentArea() {
                   </div>
                 );
               });
+
+              if (hasMore) {
+                msgElements.push(
+                  <button key="load-more" className="btn-load-more" onClick={() => dispatch({ type: 'LOAD_MORE_CHAT' })}>
+                    {newestFirst ? 'Load Older Messages' : 'Load More Messages'} ({remaining.toLocaleString()} remaining)
+                  </button>
+                );
+              }
+
+              return msgElements;
             })()}
           </div>
         </div>

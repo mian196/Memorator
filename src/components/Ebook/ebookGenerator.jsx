@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { getMappedName, formatDateForDisplay, formatDurationLong, formatTimeForDisplay, detectPlatform } from '../../utils/helpers';
+import { getMappedName, formatDateForDisplay, formatDurationLong, formatTimeForDisplay, detectPlatform, isMyMessageFast } from '../../utils/helpers';
 import { computeStatsForMessages } from '../../utils/stats';
 
 export const AVAILABLE_FONTS = [
@@ -159,12 +159,53 @@ function renderUrduToImage(text, fontSizePt, bold = false) {
 
 // ─────────────────────────────────────────────────────────────────────
 
+// Theme definitions for PDF rendering
+const THEMES = {
+  light: {
+    pageBg: [255, 255, 255],
+    textMain: [26, 26, 26],
+    textMuted: [110, 110, 110],
+    headerText: [140, 140, 140],
+    headerLine: [200, 200, 200],
+    dateSepText: [80, 80, 80],
+    dateSepBg: [240, 240, 240],
+    sentBubbleBg: [220, 237, 255],
+    sentBubbleBorder: [180, 210, 245],
+    receivedBubbleBg: [243, 243, 243],
+    receivedBubbleBorder: [220, 220, 220],
+    senderColor: [30, 80, 160],
+    timeColor: [140, 140, 140],
+    coverAccent: [30, 80, 160],
+    tocLink: [30, 80, 160],
+  },
+  dark: {
+    pageBg: [30, 33, 40],
+    textMain: [226, 232, 240],
+    textMuted: [148, 163, 184],
+    headerText: [100, 116, 139],
+    headerLine: [51, 65, 85],
+    dateSepText: [203, 213, 225],
+    dateSepBg: [44, 49, 60],
+    sentBubbleBg: [37, 99, 235],
+    sentBubbleBorder: [59, 130, 246],
+    receivedBubbleBg: [44, 49, 60],
+    receivedBubbleBorder: [51, 65, 85],
+    senderColor: [96, 165, 250],
+    timeColor: [100, 116, 139],
+    coverAccent: [96, 165, 250],
+    tocLink: [96, 165, 250],
+  }
+};
+
 export async function generateEbookPdf(data, onProgress) {
   _urduImageCache.clear(); // Clear cache from previous generation
   try {
     const doc = new jsPDF({ format: 'a4', unit: 'mm' });
     const { ebookName, aliases, conversations, fontFamily } = data;
     const font = fontFamily || 'times';
+    const theme = THEMES[data.theme] || THEMES.light;
+    const isDark = data.theme === 'dark';
+    const myNamesLower = (data.myNames || []).map(n => n.toLowerCase());
     
     // Page dimensions
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -183,28 +224,32 @@ export async function generateEbookPdf(data, onProgress) {
     let _pageFirstDate = '';
     let _pageLastDate = '';
     
+    // Fill page background for dark mode
+    const fillPageBg = () => {
+      if (isDark) {
+        doc.setFillColor(...theme.pageBg);
+        doc.rect(0, 0, pageWidth, pageHeight, 'F');
+      }
+    };
+
     // Draw page header: chat name on left, date range on right
     const drawPageHeader = () => {
       if (!_inMessages || !_currentConvName) return;
       doc.setFont(font, 'italic');
       doc.setFontSize(9);
-      doc.setTextColor(140, 140, 140);
-      // Chat name on left
-      const headerName = _currentConvName.length > 40 
-        ? _currentConvName.substring(0, 37) + '...' 
+      doc.setTextColor(...theme.headerText);
+      const headerName = _currentConvName.length > 40
+        ? _currentConvName.substring(0, 37) + '...'
         : _currentConvName;
       if (isUrdu(headerName) && _urduFontReady) {
         smartText(headerName, margin, margin + 4, { fontSize: 9 });
       } else {
         doc.text(headerName, margin, margin + 4);
       }
-      // Date range on right (filled retroactively by updatePageHeaderDate)
-      // We'll draw a placeholder that gets overwritten
-      // Separator line
-      doc.setDrawColor(200, 200, 200);
+      doc.setDrawColor(...theme.headerLine);
       doc.setLineWidth(0.3);
       doc.line(margin, margin + 8, pageWidth - margin, margin + 8);
-      doc.setTextColor(0, 0, 0);
+      doc.setTextColor(...theme.textMain);
       doc.setDrawColor(0, 0, 0);
     };
     
@@ -224,10 +269,10 @@ export async function generateEbookPdf(data, onProgress) {
     let y = margin;
     const addPage = () => {
       doc.addPage();
+      fillPageBg();
       if (_inMessages) {
         drawPageHeader();
         y = contentTop;
-        // Carry current date to the new page
         if (_currentDateStr) recordDateOnPage(_currentDateStr);
       } else {
         y = margin;
@@ -280,9 +325,11 @@ export async function generateEbookPdf(data, onProgress) {
     await new Promise(r => setTimeout(r, 50));
 
     // === 1. Cover Page ===
+    fillPageBg();
     const ebookTitle = ebookName || 'My Chat Archive';
     doc.setFontSize(28);
     doc.setFont(font, "bold");
+    doc.setTextColor(...theme.textMain);
     const splitTitle = doc.splitTextToSize(ebookTitle, pageWidth - 40);
     let titleY = pageHeight / 3;
     for (let i = 0; i < splitTitle.length; i++) {
@@ -302,8 +349,10 @@ export async function generateEbookPdf(data, onProgress) {
     
     doc.setFont(font, "normal");
     doc.setFontSize(12);
+    doc.setTextColor(...theme.textMuted);
     doc.text(`${conversations.length} Conversations Included`, pageWidth / 2, pageHeight / 1.5, { align: 'center' });
-    
+    doc.setTextColor(...theme.textMain);
+
     // === 2. Table of Contents ===
     addPage();
     doc.setFont(font, "bold");
@@ -323,9 +372,9 @@ export async function generateEbookPdf(data, onProgress) {
        
        doc.setFontSize(12);
        doc.setFont(font, "normal");
-       doc.setTextColor(30, 80, 160); // Blue link color
+       doc.setTextColor(...theme.tocLink);
        smartText(`${i + 1}. ${conv.name}`, margin, y, { fontSize: 12 });
-       doc.setTextColor(0, 0, 0);
+       doc.setTextColor(...theme.textMain);
        
        doc.setFont(font, "normal");
        doc.text(`${conv.total} msgs`, pageWidth - margin, y, { align: 'right' });
@@ -356,6 +405,7 @@ export async function generateEbookPdf(data, onProgress) {
       
       doc.setFont(font, "normal");
       doc.setFontSize(14);
+      doc.setTextColor(...theme.textMain);
       let statsY = pageHeight / 2 - 20;
       doc.text(`Total Messages: ${conv.total}`, pageWidth / 2, statsY, { align: 'center' });
       statsY += 10;
@@ -431,19 +481,23 @@ export async function generateEbookPdf(data, onProgress) {
          const msg = msgObj.msg || msgObj; // Safe access
          if (!msg || (msg.timestamp == null || (msg.timestamp === 0 && msg.dateStr === ''))) continue;
          
-         // Date Separator
+         // Date Separator — styled pill
          const msgDateStr = formatDateForDisplay(msg.timestamp);
          if (msgDateStr !== currentDateStr) {
            currentDateStr = msgDateStr;
-           _currentDateStr = msgDateStr; // Update for page headers
-           recordDateOnPage(msgDateStr); // Track date on this page
+           _currentDateStr = msgDateStr;
+           recordDateOnPage(msgDateStr);
            checkY(20);
-           y += 5;
-           doc.setFontSize(10);
+           y += 6;
+           doc.setFontSize(9);
            doc.setFont(font, "bold");
-           doc.setTextColor(50, 50, 50);
+           const dateW = doc.getTextWidth(msgDateStr) + 12;
+           const dateX = (pageWidth - dateW) / 2;
+           doc.setFillColor(...theme.dateSepBg);
+           doc.roundedRect(dateX, y - 4.5, dateW, 7, 3, 3, 'F');
+           doc.setTextColor(...theme.dateSepText);
            doc.text(msgDateStr, pageWidth / 2, y, { align: 'center' });
-           doc.setTextColor(0, 0, 0);
+           doc.setTextColor(...theme.textMain);
            y += 8;
          }
          
@@ -471,13 +525,19 @@ export async function generateEbookPdf(data, onProgress) {
          const senderText = `${sender}: `;
          doc.setFont(font, "bold");
          const senderW = doc.getTextWidth(senderText);
-         
-         // Word wrap algorithm to account for the inline sender name!
+
+         // Bubble layout constants — word wrap must fit INSIDE the bubble, not full page
+         const bubbleMaxW = textWidth * 0.72;
+         const bubblePad = 4;
+         const lineH = 5.5;
+         const wrapWidth = bubbleMaxW - bubblePad * 2 - 2; // max text width inside bubble
+
+         // Word wrap algorithm — wraps to bubble width, not page width
          const lines = [];
          let paragraphs = msgText.split('\n');
-         
+
          doc.setFont(font, "normal");
-         
+
          for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
             let p = paragraphs[pIdx];
             if (p === '' && pIdx > 0) {
@@ -486,36 +546,33 @@ export async function generateEbookPdf(data, onProgress) {
             }
             if (!p) continue;
 
-            // Defensive split of long contiguous words/lines to prevent jsPDF recursion
             let words = p.split(' ');
             let curLine = '';
-            let curW = (pIdx === 0 && lines.length === 0) ? senderW : 0;
-            
+            let curW = 0;
+
             for (let wIdx = 0; wIdx < words.length; wIdx++) {
                let w = words[wIdx];
                if (!w && wIdx < words.length - 1) { curLine += ' '; continue; }
-               
-               // For width calculation, always use the base font (Urdu images will be sized to fit)
+
                doc.setFont(font, "normal");
                let wWidth = doc.getTextWidth(w + ' ');
-               let availableW = textWidth - (curLine === '' ? curW : 0);
+               let availableW = wrapWidth - (curLine === '' ? curW : 0);
                
                if (wWidth > availableW) {
                   // Break long word using estimated char width to avoid O(N^2)
                   const avgCharW = wWidth / w.length;
-                  const maxCharsPerLine = Math.max(1, Math.floor(textWidth / avgCharW));
+                  const maxCharsPerLine = Math.max(1, Math.floor(wrapWidth / avgCharW));
                   let pos = 0;
                   while (pos < w.length) {
                      const chunk = w.substring(pos, pos + maxCharsPerLine);
                      const chunkW = doc.getTextWidth(chunk);
-                     if (curLine !== '' && curW + chunkW > textWidth) {
+                     if (curLine !== '' && curW + chunkW > wrapWidth) {
                         lines.push(curLine.trimEnd());
                         curLine = '';
                         curW = 0;
                      }
-                     if (chunkW > textWidth && chunk.length > 1) {
-                        // Chunk still too wide, take fewer chars
-                        const safeLen = Math.max(1, Math.floor(chunk.length * (textWidth / chunkW)));
+                     if (chunkW > wrapWidth && chunk.length > 1) {
+                        const safeLen = Math.max(1, Math.floor(chunk.length * (wrapWidth / chunkW)));
                         const safePart = w.substring(pos, pos + safeLen);
                         if (curLine) lines.push(curLine.trimEnd());
                         lines.push(safePart);
@@ -531,7 +588,7 @@ export async function generateEbookPdf(data, onProgress) {
                   curLine += ' ';
                   curW = doc.getTextWidth(curLine);
                } else {
-                  if (curW + wWidth > textWidth && curLine !== '') {
+                  if (curW + wWidth > wrapWidth && curLine !== '') {
                      lines.push(curLine.trimEnd());
                      curLine = w + ' ';
                      curW = doc.getTextWidth(curLine);
@@ -546,49 +603,63 @@ export async function generateEbookPdf(data, onProgress) {
 
          if (lines.length === 0) lines.push('[Empty Message]');
 
-         checkY(10);
-         
-         // Draw Sender Name (Bold)
-         doc.setFont(font, "bold");
-         doc.setFontSize(11);
-         smartText(senderText, margin, y, { fontStyle: 'bold', fontSize: 11 });
-         
-         // Draw Message Lines (Normal)
+         // Determine if this message is from "me" for bubble alignment
+         const isMe = isMyMessageFast(msg.sender, myNamesLower, data.aliasMap);
+         const bubbleBg = isMe ? theme.sentBubbleBg : theme.receivedBubbleBg;
+         const bubbleBorder = isMe ? theme.sentBubbleBorder : theme.receivedBubbleBorder;
+
+         // Measure bubble content width and height
          doc.setFont(font, "normal");
-         smartText(lines[0] || '', margin + senderW, y, { fontSize: 11 });
-         
-         for (let l = 1; l < lines.length; l++) {
-            // Use larger spacing for Urdu lines to prevent image overlap
-            const lineSpacing = isUrdu(lines[l]) ? 9 : 5.5;
-            y += lineSpacing;
-            checkY(6);
-            doc.setFont(font, "normal");
-            smartText(lines[l] || '', margin, y, { fontSize: 11 });
-         }
-         
-         // Reset for timestamp
-         doc.setFont(font, "normal");
-         
-         // Calculate Timestamp position dynamically based on last line width
-         doc.setFontSize(8);
-         const timeW = doc.getTextWidth("  " + timeStr);
-         
-         let lastLineStr = lines[lines.length - 1] || '';
          doc.setFontSize(11);
-         let lastLineW = doc.getTextWidth(lastLineStr);
-         if (lines.length === 1) lastLineW += senderW;
-         
+         let contentW = 0;
+         for (const ln of lines) { contentW = Math.max(contentW, doc.getTextWidth(ln)); }
+         contentW = Math.max(contentW, senderW);
          doc.setFontSize(8);
-         doc.setTextColor(110, 110, 110);
-         if (lastLineW + timeW < textWidth - 2) {
-            doc.text(timeStr, pageWidth - margin, y, { align: 'right' });
-         } else {
-            y += 4;
-            checkY(6);
-            doc.text(timeStr, pageWidth - margin, y, { align: 'right' });
+         contentW = Math.max(contentW, doc.getTextWidth(timeStr));
+         const bubbleW = Math.min(contentW + bubblePad * 2 + 2, bubbleMaxW);
+         const bubbleH = (isMe ? 0 : 6) + lines.length * lineH + 6 + bubblePad * 2;
+
+         checkY(bubbleH + 4);
+
+         // Position: sent = right-aligned, received = left-aligned
+         const bubbleX = isMe ? (pageWidth - margin - bubbleW) : margin;
+
+         // Draw bubble background
+         doc.setFillColor(...bubbleBg);
+         doc.setDrawColor(...bubbleBorder);
+         doc.setLineWidth(0.3);
+         doc.roundedRect(bubbleX, y - 2, bubbleW, bubbleH, 2.5, 2.5, 'FD');
+
+         let bY = y + bubblePad;
+         const textX = bubbleX + bubblePad;
+
+         // Sender name (only for received messages)
+         if (!isMe) {
+           doc.setFont(font, "bold");
+           doc.setFontSize(10);
+           doc.setTextColor(...theme.senderColor);
+           smartText(sender, textX, bY, { fontStyle: 'bold', fontSize: 10 });
+           bY += 5.5;
          }
-         doc.setTextColor(0, 0, 0);
-         y += 8; 
+
+         // Message lines
+         doc.setFont(font, "normal");
+         doc.setFontSize(11);
+         doc.setTextColor(...theme.textMain);
+         for (let l = 0; l < lines.length; l++) {
+            const lineSpacing = isUrdu(lines[l]) ? 9 : lineH;
+            smartText(lines[l] || '', textX, bY, { fontSize: 11 });
+            bY += lineSpacing;
+         }
+
+         // Timestamp — bottom right of bubble
+         bY += 1;
+         doc.setFontSize(7.5);
+         doc.setTextColor(...theme.timeColor);
+         doc.text(timeStr, bubbleX + bubbleW - bubblePad, bY, { align: 'right' });
+         doc.setTextColor(...theme.textMain);
+
+         y += bubbleH + 3;
 
          
          // Occasional yield for huge chats to not freeze browser entirely
@@ -606,20 +677,20 @@ export async function generateEbookPdf(data, onProgress) {
       doc.setPage(p);
       doc.setFont(font, "normal");
       doc.setFontSize(10);
-      doc.setTextColor(128, 128, 128);
+      doc.setTextColor(...theme.textMuted);
       doc.text(`${p}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-      
-      // Render date range in header (retroactive — now we know all dates per page)
+
+      // Render date range in header (retroactive)
       const pageData = pageDataMap.get(p);
       if (pageData) {
         doc.setFont(font, 'italic');
         doc.setFontSize(9);
-        doc.setTextColor(140, 140, 140);
+        doc.setTextColor(...theme.headerText);
         const dateLabel = pageData.firstDate === pageData.lastDate
           ? pageData.firstDate
           : `${pageData.firstDate} - ${pageData.lastDate}`;
         doc.text(dateLabel, pageWidth - margin, margin + 4, { align: 'right' });
-        doc.setTextColor(0, 0, 0);
+        doc.setTextColor(...theme.textMain);
       }
     }
     

@@ -55,11 +55,28 @@ export function isExcluded(threadName, senderName, excludeNames) {
   if (excludeNames.length === 0) return false;
   const tLower = (threadName || '').toLowerCase();
   const sLower = (senderName || '').toLowerCase();
-  return excludeNames.some(ex => tLower.includes(ex) || sLower.includes(ex));
+  return excludeNames.some(ex => {
+    // Exact match on sender name — prevents "unknown" from matching "Simon Riley (unknown)"
+    // Substring match on thread name — allows excluding entire chats by partial name
+    return sLower === ex || tLower.includes(ex);
+  });
 }
 
-export function cleanThreadName(rawName, participants = [], myNames = []) {
+export function cleanThreadName(rawName, participants = [], myNames = [], folderHint = '') {
   let name = rawName || '';
+
+  // Handle Facebook "Participants: X and Y" title format — strip prefix and own name
+  if (/^participants:/i.test(name)) {
+    const inner = name.replace(/^participants:\s*/i, '');
+    const myNamesLower = myNames.map(n => n.toLowerCase());
+    // Split on " and " or ", "
+    let parts = inner.split(/\s+and\s+|,\s*/i).map(s => s.trim()).filter(Boolean);
+    // Remove only own name — keep "Facebook user" as-is (deleted accounts)
+    parts = parts.filter(p => !myNamesLower.includes(p.toLowerCase()) && p.toLowerCase() !== 'you');
+    name = parts.join(', ');
+  }
+
+  // Handle comma-separated participant lists (e.g. "Alice, Bob, Me")
   if (name && name.includes(',')) {
     let parts = name.split(',').map(s => s.trim()).filter(
       p => !myNames.some(m => m.toLowerCase() === p.toLowerCase())
@@ -67,15 +84,25 @@ export function cleanThreadName(rawName, participants = [], myNames = []) {
     if (parts.length > 0) name = parts.join(', ');
     else name = '';
   }
-  if (!name || name === 'Unknown Chat' || name.match(/_\d+$/) || name.toLowerCase() === 'unknown') {
+
+  // Fall back to participants list if name is still unresolvable
+  const isUnresolvable = !name || name === 'Unknown Chat' || name.match(/_\d+$/) || name.toLowerCase() === 'unknown';
+  if (isUnresolvable) {
     if (participants.length > 0) {
-      const others = participants.filter(p => {
-        const pLow = p.toLowerCase();
-        return !myNames.some(m => m.toLowerCase() === pLow) && pLow !== 'you';
-      });
+      const myNamesLower = myNames.map(n => n.toLowerCase());
+      const others = participants.filter(p => !myNamesLower.includes(p.toLowerCase()) && p.toLowerCase() !== 'you');
       if (others.length > 0) name = others.join(', ');
     }
   }
+
+  // If the name contains "Facebook user", use folder hint to make it unique —
+  // multiple deleted-account chats would otherwise all merge into one
+  if (folderHint && name.toLowerCase().includes('facebook user')) {
+    name = `Facebook user (${folderHint})`;
+  } else if ((!name || name === 'Unknown Chat') && folderHint) {
+    name = folderHint;
+  }
+
   return name || 'Unknown Chat';
 }
 

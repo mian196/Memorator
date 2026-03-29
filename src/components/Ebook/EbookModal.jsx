@@ -19,6 +19,7 @@ export default function EbookModal() {
   const [convLimit, setConvLimit] = useState('all'); // 'all', '10', '20', '50', '100', '200', 'custom'
   const [customLimit, setCustomLimit] = useState('');
   const [fontFamily, setFontFamily] = useState('times');
+  const [pdfTheme, setPdfTheme] = useState('light');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState('');
@@ -172,7 +173,8 @@ export default function EbookModal() {
         }),
         myNames,
         aliasMap,
-        fontFamily
+        fontFamily,
+        theme: pdfTheme
       };
 
       await generateEbookPdf(ebookData, (pct, text) => {
@@ -218,6 +220,23 @@ export default function EbookModal() {
               ))}
             </select>
           </div>
+        </div>
+
+        {/* PDF Theme */}
+        <h3>🎨 PDF Theme</h3>
+        <div className="ebook-toggle-row">
+          <button
+            className={`ebook-toggle-btn ${pdfTheme === 'light' ? 'active' : ''}`}
+            onClick={() => setPdfTheme('light')}
+          >
+            Light Mode
+          </button>
+          <button
+            className={`ebook-toggle-btn ${pdfTheme === 'dark' ? 'active' : ''}`}
+            onClick={() => setPdfTheme('dark')}
+          >
+            Dark Mode
+          </button>
         </div>
 
         {/* Sort Order */}
