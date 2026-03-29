@@ -224,34 +224,47 @@ export function AppProvider({ children }) {
 
     const expandedFiles = [];
 
-    // Pre-process ZIP files
-    for (const f of files) {
-      if (f.name.endsWith('.zip')) {
-        try {
-          const zip = await JSZip.loadAsync(f);
-          for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
-            if (zipEntry.dir) continue;
+    // Pre-process ZIP files — show progress during extraction
+    const zipFiles = files.filter(f => f.name.endsWith('.zip'));
+    const nonZipFiles = files.filter(f => !f.name.endsWith('.zip'));
+    expandedFiles.push(...nonZipFiles);
 
-            const isData = relativePath.endsWith('.txt') || relativePath.endsWith('.json') || 
-                           relativePath.endsWith('.html') || relativePath.endsWith('.ndjson');
-            const isMedia = relativePath.match(/\.(jpg|jpeg|png|gif|mp4|opus|mp3|pdf|doc|docx)$/i);
+    if (zipFiles.length > 0) {
+      dispatch({ type: 'SET_LOADING', payload: { loading: true, message: `Extracting ${zipFiles.length} ZIP file(s)...` } });
+    }
 
-            if (isData || isMedia) {
-              const blob = await zipEntry.async('blob');
-              const extractedFile = new File([blob], relativePath.split('/').pop(), { type: blob.type });
-              
-              // Attach the original zip name + internal path so parsers group them correctly
-              Object.defineProperty(extractedFile, 'webkitRelativePath', {
-                value: `${f.name.replace('.zip', '')}/${relativePath}`
-              });
-              expandedFiles.push(extractedFile);
-            }
+    for (let zi = 0; zi < zipFiles.length; zi++) {
+      const f = zipFiles[zi];
+      try {
+        dispatch({ type: 'SET_LOADING', payload: { loading: true, message: `Extracting ZIP ${zi + 1}/${zipFiles.length}: ${f.name}...` } });
+        await new Promise(r => setTimeout(r, 0)); // yield for UI update
+
+        const zip = await JSZip.loadAsync(f);
+        const entries = Object.entries(zip.files).filter(([, e]) => !e.dir);
+        const relevantEntries = entries.filter(([relativePath]) => {
+          return relativePath.endsWith('.txt') || relativePath.endsWith('.json') ||
+                 relativePath.endsWith('.html') || relativePath.endsWith('.ndjson') ||
+                 /\.(jpg|jpeg|png|gif|mp4|opus|mp3|pdf|doc|docx)$/i.test(relativePath);
+        });
+
+        for (let ei = 0; ei < relevantEntries.length; ei++) {
+          const [relativePath, zipEntry] = relevantEntries[ei];
+
+          if (ei % 20 === 0) {
+            dispatch({ type: 'SET_LOADING', payload: { loading: true, message: `Extracting ${f.name}: ${ei + 1}/${relevantEntries.length} files...` } });
+            await new Promise(r => setTimeout(r, 0));
           }
-        } catch (e) {
-          console.error("Failed to unzip", f.name, e);
+
+          const blob = await zipEntry.async('blob');
+          const extractedFile = new File([blob], relativePath.split('/').pop(), { type: blob.type });
+
+          Object.defineProperty(extractedFile, 'webkitRelativePath', {
+            value: `${f.name.replace('.zip', '')}/${relativePath}`
+          });
+          expandedFiles.push(extractedFile);
         }
-      } else {
-        expandedFiles.push(f);
+      } catch (e) {
+        console.error("Failed to unzip", f.name, e);
       }
     }
 

@@ -18,7 +18,7 @@ export default function EbookModal() {
   }); // 'both', 'individual', 'group'
   const [convLimit, setConvLimit] = useState('all'); // 'all', '10', '20', '50', '100', '200', 'custom'
   const [customLimit, setCustomLimit] = useState('');
-  const [fontFamily, setFontFamily] = useState('Times');
+  const [fontFamily, setFontFamily] = useState('times');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState('');

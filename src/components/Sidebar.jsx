@@ -61,6 +61,17 @@ export default function Sidebar() {
               onChange={e => dispatch({ type: 'SET_CONFIG', payload: { myNamesRaw: state.myNamesRaw, excludeRaw: e.target.value, aliasRaw: state.aliasRaw } })}
             />
 
+            <label className="sidebar-label">DATE FORMAT</label>
+            <select
+              className="sidebar-input"
+              value={state.dateFormat}
+              onChange={e => dispatch({ type: 'SET_CONFIG', payload: { myNamesRaw: state.myNamesRaw, excludeRaw: state.excludeRaw, aliasRaw: state.aliasRaw, dateFormat: e.target.value } })}
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="DMY">DD/MM/YYYY (Day first)</option>
+              <option value="MDY">MM/DD/YYYY (Month first)</option>
+            </select>
+
             <label className="sidebar-label" title="Format: Target Name = Alias 1, Alias 2">
               MERGE CONTACTS (ALIASES)
             </label>

@@ -10,10 +10,10 @@ function getDB() {
   });
 }
 
-export async function saveStateToDB(messages, media, myNamesRaw, excludeRaw, aliasRaw) {
+export async function saveStateToDB(messages, media, myNamesRaw, excludeRaw, aliasRaw, dateFormat) {
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
-  const snapshot = { messages, media, myNamesRaw, excludeRaw, aliasRaw };
+  const snapshot = { messages, media, myNamesRaw, excludeRaw, aliasRaw, dateFormat, _schemaVersion: 2 };
   tx.objectStore(STORE_NAME).put(snapshot, 'latest');
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
