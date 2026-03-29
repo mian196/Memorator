@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { List as VirtualList } from 'react-window';
 import { useApp } from '../contexts/AppContext';
-import { getMappedName, isExcluded, escapeHtml, escapeRegExp, formatDuration, formatDurationLong } from '../utils/helpers';
+import { getMappedName, isExcluded, escapeHtml, escapeRegExp, formatDuration, formatDurationLong, isMyMessageFast } from '../utils/helpers';
 import { computeStatsForMessages } from '../utils/stats';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -8,6 +9,7 @@ import { saveAs } from 'file-saver';
 export default function ContentArea() {
   const { state, dispatch } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -17,6 +19,8 @@ export default function ContentArea() {
   const handleSearchInput = useCallback((e) => {
     const val = e.target.value;
     setSearchQuery(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(val), 200);
   }, []);
 
   const validMessages = useMemo(() =>
@@ -25,14 +29,14 @@ export default function ContentArea() {
   );
 
   const searchResults = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return validMessages.slice(0, 50);
+    const q = debouncedQuery.toLowerCase().trim();
+    if (!q) return validMessages.slice(0, 200);
     return validMessages.filter(m =>
       m.content.toLowerCase().includes(q) ||
       getMappedName(m.sender, aliasMap).toLowerCase().includes(q) ||
       getMappedName(m.threadName, aliasMap).toLowerCase().includes(q)
     );
-  }, [searchQuery, validMessages, aliasMap]);
+  }, [debouncedQuery, validMessages, aliasMap]);
 
   // --- Chat data ---
   const chatData = activeChatName ? chats[activeChatName] : null;
@@ -55,9 +59,10 @@ export default function ContentArea() {
       `Total Messages: ${chatData.total}\n`,
       '--------------------------------------------------\n'
     ];
+    const myNamesLower = myNames.map(n => n.toLowerCase());
     [...chatData.list].reverse().forEach(msg => {
       const mappedSender = getMappedName(msg.sender, aliasMap);
-      const isMe = myNames.includes(mappedSender) || myNames.includes(msg.sender);
+      const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
       lines.push(`[${msg.dateStr}] ${isMe ? 'ME' : mappedSender}:`);
       if (msg.reactions && msg.reactions.length > 0) lines.push(`Reactions: ${msg.reactions.join(', ')}`);
       lines.push(msg.content);
@@ -216,7 +221,7 @@ export default function ContentArea() {
               </div>
             ) : (
               <>
-                {searchResults.slice(0, 100).map((msg, i) => {
+                {searchResults.slice(0, 500).map((msg, i) => {
                   const mSender = getMappedName(msg.sender, aliasMap);
                   const mThread = getMappedName(msg.threadName, aliasMap);
                   let contentHtml = escapeHtml(msg.content);
@@ -241,9 +246,9 @@ export default function ContentArea() {
                     </div>
                   );
                 })}
-                {searchResults.length > 100 && (
+                {searchResults.length > 500 && (
                   <div style={{ textAlign: 'center', padding: 10, color: 'gray' }}>
-                    ...and {searchResults.length - 100} more results
+                    ...and {searchResults.length - 500} more results
                   </div>
                 )}
               </>
@@ -259,24 +264,63 @@ export default function ContentArea() {
             </button>
           )}
           <div className="chat-view" ref={chatContainerRef}>
-            {chatData && chatData.list.slice(-chatLimit).map((msg, i) => {
-              const mappedSender = getMappedName(msg.sender, aliasMap);
-              const isMe = myNames.includes(mappedSender) || myNames.includes(msg.sender);
-              return (
-                <div key={i} className={`chat-bubble ${isMe ? 'sent' : 'received'}`}>
-                  {!isMe && <span className="bubble-sender">{mappedSender}</span>}
-                  {msg.content}
-                  {msg.reactions && msg.reactions.length > 0 && (
-                    <div className="reaction-container">
-                      {msg.reactions.map((r, j) => (
-                        <span key={j} className="reaction-badge">{r}</span>
-                      ))}
+            {chatData && (() => {
+              const visibleMsgs = chatData.list.slice(-chatLimit);
+              const myNamesLower = myNames.map(n => n.toLowerCase());
+              const ChatRow = ({ index, style }) => {
+                const msg = visibleMsgs[index];
+                const mappedSender = getMappedName(msg.sender, aliasMap);
+                const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
+                return (
+                  <div style={style}>
+                    <div className={`chat-bubble ${isMe ? 'sent' : 'received'}`}>
+                      {!isMe && <span className="bubble-sender">{mappedSender}</span>}
+                      {msg.content}
+                      {msg.reactions && msg.reactions.length > 0 && (
+                        <div className="reaction-container">
+                          {msg.reactions.map((r, j) => (
+                            <span key={j} className="reaction-badge">{r}</span>
+                          ))}
+                        </div>
+                      )}
+                      <span className="bubble-date">{msg.dateStr}</span>
                     </div>
-                  )}
-                  <span className="bubble-date">{msg.dateStr}</span>
-                </div>
-              );
-            })}
+                  </div>
+                );
+              };
+              // Use virtualized list for large chats, regular render for small ones
+              if (visibleMsgs.length > 200) {
+                return (
+                  <VirtualList
+                    height={600}
+                    itemCount={visibleMsgs.length}
+                    itemSize={80}
+                    width="100%"
+                    initialScrollOffset={visibleMsgs.length * 80}
+                  >
+                    {ChatRow}
+                  </VirtualList>
+                );
+              }
+              return visibleMsgs.map((msg, i) => {
+                const mappedSender = getMappedName(msg.sender, aliasMap);
+                const isMe = isMyMessageFast(msg.sender, myNamesLower, aliasMap);
+                return (
+                  <div key={i} className={`chat-bubble ${isMe ? 'sent' : 'received'}`}>
+                    {!isMe && <span className="bubble-sender">{mappedSender}</span>}
+                    {msg.content}
+                    {msg.reactions && msg.reactions.length > 0 && (
+                      <div className="reaction-container">
+                        {msg.reactions.map((r, j) => (
+                          <span key={j} className="reaction-badge">{r}</span>
+                        ))}
+                      </div>
+                    )}
+                    <span className="bubble-date">{msg.dateStr}</span>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
 
