@@ -295,36 +295,27 @@ export default function ContentArea() {
                 <button
                   className="btn chat-jump-btn"
                   onClick={() => {
-                    setViewEnd(false);
-                    dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 });
-                    setTimeout(() => {
-                      if (chatContainerRef.current) chatContainerRef.current.scrollTop = 0;
-                    }, 50);
-                  }}
-                  title={newestFirst ? "Jump to the most recent messages" : "Jump to the very first message"}
-                >
-                  {newestFirst ? "Jump to Latest" : "Jump to First"}
-                </button>
-                <button
-                  className="btn chat-jump-btn"
-                  onClick={() => {
-                    setViewEnd(true);
-                    dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 });
-                    setTimeout(() => {
-                      if (chatContainerRef.current) {
-                        // When viewEnd=true in oldest-first: last slice = latest msgs, scroll to bottom so newest is visible
-                        // When viewEnd=true in newest-first: last slice = oldest msgs, scroll to top
-                        if (!newestFirst) {
-                          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-                        } else {
-                          chatContainerRef.current.scrollTop = 0;
+                    setViewEnd(v => {
+                      const next = !v;
+                      dispatch({ type: 'SET_CHAT_LIMIT', payload: 50 });
+                      setTimeout(() => {
+                        if (chatContainerRef.current) {
+                          // oldest-first + viewEnd=true → tail = newest → scroll to bottom
+                          chatContainerRef.current.scrollTop = (!newestFirst && next)
+                            ? chatContainerRef.current.scrollHeight
+                            : 0;
                         }
-                      }
-                    }, 100);
+                      }, 100);
+                      return next;
+                    });
                   }}
-                  title={newestFirst ? "Jump to the oldest messages" : "Jump to the most recent messages"}
+                  title={newestFirst
+                    ? (viewEnd ? "Back to latest messages" : "Jump to oldest messages")
+                    : (viewEnd ? "Back to oldest messages" : "Jump to latest messages")}
                 >
-                  {newestFirst ? "Jump to First" : "Jump to Latest"}
+                  {newestFirst
+                    ? (viewEnd ? "↑ Back to Latest" : "↓ Jump to Oldest")
+                    : (viewEnd ? "↑ Back to Oldest" : "↓ Jump to Latest")}
                 </button>
                 <span className="chat-msg-count">{chatData.total.toLocaleString()} msgs</span>
               </div>
