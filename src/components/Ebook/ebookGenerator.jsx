@@ -362,7 +362,7 @@ async function generateSimplePdf(data, onProgress) {
 }
 
 export async function generateEbookPdf(data, onProgress) {
-  _urduImageCache.clear(); // Clear cache from previous generation
+  _canvasImageCache.clear(); // Clear cache from previous generation
   if (data.pdfStyle === 'simple') {
     return generateSimplePdf(data, onProgress);
   }
