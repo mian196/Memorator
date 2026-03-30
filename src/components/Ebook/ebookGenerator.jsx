@@ -778,11 +778,25 @@ export async function generateEbookPdf(data, onProgress) {
          const bubbleBgCss = `rgb(${bubbleBg[0]},${bubbleBg[1]},${bubbleBg[2]})`;
          const bubbleFgCss = `rgb(${theme.textMain[0]},${theme.textMain[1]},${theme.textMain[2]})`;
 
-         // Measure bubble content width and height (use measureW to include emoji widths)
+         // Pre-render emoji segments for each line ONCE — reused for both width measurement
+         // and actual rendering, avoiding double canvas work
+         const renderedLines = lines.map(ln => {
+           if (!ln || !hasEmoji(ln)) return { raw: ln, segments: null, totalW: measureW(ln) };
+           const segs = splitEmojiSegments(ln).map(seg => {
+             if (seg.isEmoji) {
+               const img = renderToImage(seg.text, 11, { bgColor: bubbleBgCss, fgColor: bubbleFgCss });
+               return { ...seg, img, w: img.widthMm };
+             }
+             return { ...seg, w: doc.getTextWidth(seg.text) };
+           });
+           return { raw: ln, segments: segs, totalW: segs.reduce((s, sg) => s + sg.w, 0) };
+         });
+
+         // Measure bubble dimensions using pre-rendered widths
          doc.setFont(font, "normal");
          doc.setFontSize(11);
          let contentW = 0;
-         for (const ln of lines) { contentW = Math.max(contentW, measureW(ln)); }
+         for (const rl of renderedLines) contentW = Math.max(contentW, rl.totalW);
          contentW = Math.max(contentW, senderW);
          doc.setFontSize(8);
          contentW = Math.max(contentW, doc.getTextWidth(timeStr));
@@ -791,10 +805,8 @@ export async function generateEbookPdf(data, onProgress) {
 
          checkY(bubbleH + 4);
 
-         // Position: sent = right-aligned, received = left-aligned
          const bubbleX = isMe ? (pageWidth - margin - bubbleW) : margin;
 
-         // Draw bubble background
          doc.setFillColor(...bubbleBg);
          doc.setDrawColor(...bubbleBorder);
          doc.setLineWidth(0.3);
@@ -803,7 +815,6 @@ export async function generateEbookPdf(data, onProgress) {
          let bY = y + bubblePad;
          const textX = bubbleX + bubblePad;
 
-         // Sender name (only for received messages)
          if (!isMe) {
            doc.setFont(font, "bold");
            doc.setFontSize(10);
@@ -812,13 +823,29 @@ export async function generateEbookPdf(data, onProgress) {
            bY += 5.5;
          }
 
-         // Message lines
+         // Render lines using pre-rendered segment data
          doc.setFont(font, "normal");
          doc.setFontSize(11);
          doc.setTextColor(...theme.textMain);
-         for (let l = 0; l < lines.length; l++) {
-            const lineSpacing = isUrdu(lines[l]) ? 9 : lineH;
-            if (lines[l]) smartText(lines[l], textX, bY, { fontSize: 11, bgColor: bubbleBgCss, fgColor: bubbleFgCss });
+         for (const rl of renderedLines) {
+            const lineSpacing = isUrdu(rl.raw) ? 9 : lineH;
+            if (!rl.raw) { bY += lineSpacing; continue; }
+            if (!rl.segments) {
+              // No emoji — native text
+              doc.text(rl.raw, textX, bY);
+            } else {
+              // Inline segments — text + emoji images
+              let curX = textX;
+              for (const seg of rl.segments) {
+                if (seg.isEmoji) {
+                  const yOff = seg.img.heightMm * 0.85;
+                  doc.addImage(seg.img.dataUrl, 'JPEG', curX, bY - yOff, seg.img.widthMm, seg.img.heightMm);
+                } else {
+                  doc.text(seg.text, curX, bY);
+                }
+                curX += seg.w;
+              }
+            }
             bY += lineSpacing;
          }
 
