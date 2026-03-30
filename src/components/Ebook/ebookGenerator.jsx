@@ -124,23 +124,24 @@ function renderToImage(text, fontSizePt, { bold = false, bgColor = '#FFFFFF', fg
 
   const metrics = ctx.measureText(text);
   const textW = metrics.width;
-  // Urdu Nastaliq needs tall canvas; emoji needs ~1.4x line height
-  const textH = isUrduText ? fontSizePx * 2.4 : fontSizePx * 1.5;
+  // Urdu Nastaliq needs tall canvas; emoji just needs a square cell matching font size
+  const textH = isUrduText ? fontSizePx * 2.4 : fontSizePx * 1.2;
 
-  canvas.width = Math.ceil(textW) + 8;
-  canvas.height = Math.ceil(textH) + 8;
+  canvas.width = Math.ceil(textW) + 4;
+  canvas.height = Math.ceil(textH) + 4;
 
   ctx.font = `${fontWeight} ${fontSizePx}px ${canvasFontFamily}`;
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = fgColor;
-  ctx.textBaseline = 'middle';
+  ctx.textBaseline = 'alphabetic';
 
   if (isUrduText) {
     ctx.direction = 'rtl';
     ctx.fillText(text, canvas.width - 4, canvas.height * 0.55);
   } else {
-    ctx.fillText(text, 4, canvas.height * 0.55);
+    // Draw emoji so baseline sits at ~85% of canvas height — leaves room for descenders
+    ctx.fillText(text, 2, canvas.height * 0.85);
   }
 
   const pxToMm = 25.4 / 96;
@@ -508,7 +509,8 @@ export async function generateEbookPdf(data, onProgress) {
 
       for (const seg of measured) {
         if (seg.isEmoji) {
-          const yOffset = seg.img.heightMm * 0.3;
+          // Align emoji baseline (at 85% of image height) with text baseline (yPos)
+          const yOffset = seg.img.heightMm * 0.85;
           doc.addImage(seg.img.dataUrl, 'JPEG', curX, yPos - yOffset, seg.img.widthMm, seg.img.heightMm);
           curX += seg.img.widthMm;
         } else {
@@ -816,7 +818,7 @@ export async function generateEbookPdf(data, onProgress) {
          doc.setTextColor(...theme.textMain);
          for (let l = 0; l < lines.length; l++) {
             const lineSpacing = isUrdu(lines[l]) ? 9 : lineH;
-            smartText(lines[l] || '', textX, bY, { fontSize: 11, bgColor: bubbleBgCss, fgColor: bubbleFgCss });
+            if (lines[l]) smartText(lines[l], textX, bY, { fontSize: 11, bgColor: bubbleBgCss, fgColor: bubbleFgCss });
             bY += lineSpacing;
          }
 
