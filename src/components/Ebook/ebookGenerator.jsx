@@ -720,7 +720,19 @@ export async function generateEbookPdf(data, onProgress) {
          const lineH = 5.5;
          const wrapWidth = bubbleMaxW - bubblePad * 2 - 2; // max text width inside bubble
 
-         // Word wrap algorithm — wraps to bubble width, not page width
+         // Measure a string's rendered width including emoji (which have 0 width in jsPDF)
+         const measureW = (str) => {
+           if (!str) return 0;
+           if (!hasEmoji(str)) return doc.getTextWidth(str);
+           return splitEmojiSegments(str).reduce((sum, seg) => {
+             if (seg.isEmoji) {
+               return sum + renderToImage(seg.text, 11, { bgColor: '#ffffff', fgColor: '#000000' }).widthMm;
+             }
+             return sum + doc.getTextWidth(seg.text);
+           }, 0);
+         };
+
+         // Word wrap algorithm — wraps to bubble width, accounts for emoji width
          const lines = [];
          let paragraphs = msgText.split('\n');
 
@@ -728,10 +740,7 @@ export async function generateEbookPdf(data, onProgress) {
 
          for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
             let p = paragraphs[pIdx];
-            if (p === '' && pIdx > 0) {
-               lines.push(' ');
-               continue;
-            }
+            if (p === '' && pIdx > 0) { lines.push(' '); continue; }
             if (!p) continue;
 
             let words = p.split(' ');
@@ -743,47 +752,15 @@ export async function generateEbookPdf(data, onProgress) {
                if (!w && wIdx < words.length - 1) { curLine += ' '; continue; }
 
                doc.setFont(font, "normal");
-               let wWidth = doc.getTextWidth(w + ' ');
-               let availableW = wrapWidth - (curLine === '' ? curW : 0);
-               
-               if (wWidth > availableW) {
-                  // Break long word using estimated char width to avoid O(N^2)
-                  const avgCharW = wWidth / w.length;
-                  const maxCharsPerLine = Math.max(1, Math.floor(wrapWidth / avgCharW));
-                  let pos = 0;
-                  while (pos < w.length) {
-                     const chunk = w.substring(pos, pos + maxCharsPerLine);
-                     const chunkW = doc.getTextWidth(chunk);
-                     if (curLine !== '' && curW + chunkW > wrapWidth) {
-                        lines.push(curLine.trimEnd());
-                        curLine = '';
-                        curW = 0;
-                     }
-                     if (chunkW > wrapWidth && chunk.length > 1) {
-                        const safeLen = Math.max(1, Math.floor(chunk.length * (wrapWidth / chunkW)));
-                        const safePart = w.substring(pos, pos + safeLen);
-                        if (curLine) lines.push(curLine.trimEnd());
-                        lines.push(safePart);
-                        curLine = '';
-                        curW = 0;
-                        pos += safeLen;
-                     } else {
-                        curLine += chunk;
-                        curW = doc.getTextWidth(curLine);
-                        pos += chunk.length;
-                     }
-                  }
-                  curLine += ' ';
-                  curW = doc.getTextWidth(curLine);
+               let wWidth = measureW(w + ' ');
+
+               if (curW + wWidth > wrapWidth && curLine !== '') {
+                  lines.push(curLine.trimEnd());
+                  curLine = w + ' ';
+                  curW = wWidth;
                } else {
-                  if (curW + wWidth > wrapWidth && curLine !== '') {
-                     lines.push(curLine.trimEnd());
-                     curLine = w + ' ';
-                     curW = doc.getTextWidth(curLine);
-                  } else {
-                     curLine += w + ' ';
-                     curW += wWidth;
-                  }
+                  curLine += w + ' ';
+                  curW += wWidth;
                }
             }
             if (curLine.trimEnd()) lines.push(curLine.trimEnd());
@@ -799,11 +776,11 @@ export async function generateEbookPdf(data, onProgress) {
          const bubbleBgCss = `rgb(${bubbleBg[0]},${bubbleBg[1]},${bubbleBg[2]})`;
          const bubbleFgCss = `rgb(${theme.textMain[0]},${theme.textMain[1]},${theme.textMain[2]})`;
 
-         // Measure bubble content width and height
+         // Measure bubble content width and height (use measureW to include emoji widths)
          doc.setFont(font, "normal");
          doc.setFontSize(11);
          let contentW = 0;
-         for (const ln of lines) { contentW = Math.max(contentW, doc.getTextWidth(ln)); }
+         for (const ln of lines) { contentW = Math.max(contentW, measureW(ln)); }
          contentW = Math.max(contentW, senderW);
          doc.setFontSize(8);
          contentW = Math.max(contentW, doc.getTextWidth(timeStr));
