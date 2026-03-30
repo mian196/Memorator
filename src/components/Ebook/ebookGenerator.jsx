@@ -108,7 +108,11 @@ async function ensureUrduFont() {
 const _canvasImageCache = new Map();
 
 function renderToImage(text, fontSizePt, { bold = false, bgColor = '#FFFFFF', fgColor = '#000000', isUrduText = false } = {}) {
-  const cacheKey = `${text}|${fontSizePt}|${bold}|${bgColor}|${fgColor}`;
+  // Emoji: cache by text+size only (transparent PNG, no bg dependency)
+  // Urdu: include colors in key since fgColor determines text appearance
+  const cacheKey = isUrduText
+    ? `${text}|${fontSizePt}|${bold}|${bgColor}|${fgColor}`
+    : `${text}|${fontSizePt}|${bold}`;
   if (_canvasImageCache.has(cacheKey)) return _canvasImageCache.get(cacheKey);
 
   const scale = 2;
@@ -119,28 +123,28 @@ function renderToImage(text, fontSizePt, { bold = false, bgColor = '#FFFFFF', fg
     : "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
 
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  // Urdu needs solid background; emoji uses transparent PNG (no bg box)
+  const ctx = canvas.getContext('2d', { alpha: !isUrduText });
   ctx.font = `${fontWeight} ${fontSizePx}px ${canvasFontFamily}`;
 
   const metrics = ctx.measureText(text);
   const textW = metrics.width;
-  // Urdu Nastaliq needs tall canvas; emoji just needs a square cell matching font size
   const textH = isUrduText ? fontSizePx * 2.4 : fontSizePx * 1.2;
 
   canvas.width = Math.ceil(textW) + 4;
   canvas.height = Math.ceil(textH) + 4;
 
   ctx.font = `${fontWeight} ${fontSizePx}px ${canvasFontFamily}`;
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = fgColor;
   ctx.textBaseline = 'alphabetic';
 
   if (isUrduText) {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = fgColor;
     ctx.direction = 'rtl';
     ctx.fillText(text, canvas.width - 4, canvas.height * 0.55);
   } else {
-    // Draw emoji so baseline sits at ~85% of canvas height — leaves room for descenders
+    // Transparent background — emoji renders without a white box
     ctx.fillText(text, 2, canvas.height * 0.85);
   }
 
@@ -148,7 +152,12 @@ function renderToImage(text, fontSizePt, { bold = false, bgColor = '#FFFFFF', fg
   const widthMm = (canvas.width / scale) * pxToMm;
   const heightMm = (canvas.height / scale) * pxToMm;
 
-  const result = { dataUrl: canvas.toDataURL('image/jpeg', 0.75), widthMm, heightMm };
+  // Emoji → PNG with transparency; Urdu → JPEG (solid bg)
+  const dataUrl = isUrduText
+    ? canvas.toDataURL('image/jpeg', 0.85)
+    : canvas.toDataURL('image/png');
+  const format = isUrduText ? 'JPEG' : 'PNG';
+  const result = { dataUrl, widthMm, heightMm, format, alias: cacheKey };
   _canvasImageCache.set(cacheKey, result);
   return result;
 }
@@ -246,7 +255,7 @@ async function generateSimplePdf(data, onProgress) {
       if (y + needed > pageHeight - margin) addPage();
     };
 
-    onProgress(5, 'Building cover page...');
+    await onProgress(5, 'Building cover page...');
 
     // Cover
     doc.setFont(font, 'bold');
@@ -267,8 +276,7 @@ async function generateSimplePdf(data, onProgress) {
     for (let c = 0; c < totalConvs; c++) {
       const conv = conversations[c];
       const pct = Math.floor((c / totalConvs) * 90);
-      onProgress(10 + pct, `Processing ${c + 1}/${totalConvs}: ${conv.name}`);
-      await new Promise(r => setTimeout(r, 0));
+      await onProgress(10 + pct, `Processing ${c + 1}/${totalConvs}: ${conv.name}`);
 
       // Conversation header page
       addPage();
@@ -315,7 +323,9 @@ async function generateSimplePdf(data, onProgress) {
         const timeStr = formatTimeForDisplay(msg.timestamp);
 
         let msgText = String(msg.content || '[Media]')
-          .replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFFFC\uFFFD]/g, '');
+          .replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFFFC\uFFFD]/g, '')
+          .replace(/\p{Extended_Pictographic}(\uFE0F)?(\u20E3)?([\u200D]\p{Extended_Pictographic}(\uFE0F)?(\u20E3)?)*/gu, '')
+          .trim() || '[Media]';
 
         // Sender + time line
         doc.setFont(font, 'bold');
@@ -337,7 +347,7 @@ async function generateSimplePdf(data, onProgress) {
         });
         y += 2;
 
-        if (m % 500 === 0) await new Promise(r => setTimeout(r, 0));
+        if (m % 500 === 0) await onProgress(10 + Math.floor((c / totalConvs) * 88) + Math.floor((m / Math.max(conv.messages.length, 1)) * Math.floor(88 / totalConvs)), `Chat ${c + 1}/${totalConvs}: msg ${m}`);
       }
     }
 
@@ -351,11 +361,10 @@ async function generateSimplePdf(data, onProgress) {
       doc.text(`${p}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
     }
 
-    onProgress(98, 'Saving...');
-    await new Promise(r => setTimeout(r, 50));
+    await onProgress(98, 'Saving...');
     const filename = `${(ebookName || 'Ebook').replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, '_')}_simple.pdf`;
     doc.save(filename);
-    onProgress(100, 'Download started!');
+    await onProgress(100, 'Download started!');
   } catch (err) {
     console.error('Simple PDF generation error:', err);
     throw err;
@@ -364,6 +373,7 @@ async function generateSimplePdf(data, onProgress) {
 
 export async function generateEbookPdf(data, onProgress) {
   _canvasImageCache.clear(); // Clear cache from previous generation
+
   if (data.pdfStyle === 'simple') {
     return generateSimplePdf(data, onProgress);
   }
@@ -452,9 +462,8 @@ export async function generateEbookPdf(data, onProgress) {
     };
 
     // ── Load Urdu font for canvas ──
-    onProgress(2, 'Loading Noto Nastaliq Urdu font...');
+    await onProgress(2, 'Loading Noto Nastaliq Urdu font...');
     await ensureUrduFont();
-    await new Promise(r => setTimeout(r, 50));
 
     /**
      * Smart text renderer: canvas-image for Urdu/emoji, native doc.text for plain text.
@@ -473,7 +482,7 @@ export async function generateEbookPdf(data, onProgress) {
         if (options.align === 'center') imgX = x - img.widthMm / 2;
         else if (options.align === 'right') imgX = x - img.widthMm;
         const yOffset = img.heightMm * 0.45;
-        doc.addImage(img.dataUrl, 'JPEG', imgX, yPos - yOffset, img.widthMm, img.heightMm);
+        doc.addImage(img.dataUrl, img.format, imgX, yPos - yOffset, img.widthMm, img.heightMm, img.alias);
         return;
       }
 
@@ -511,7 +520,7 @@ export async function generateEbookPdf(data, onProgress) {
         if (seg.isEmoji) {
           // Align emoji baseline (at 85% of image height) with text baseline (yPos)
           const yOffset = seg.img.heightMm * 0.85;
-          doc.addImage(seg.img.dataUrl, 'JPEG', curX, yPos - yOffset, seg.img.widthMm, seg.img.heightMm);
+          doc.addImage(seg.img.dataUrl, seg.img.format, curX, yPos - yOffset, seg.img.widthMm, seg.img.heightMm, seg.img.alias);
           curX += seg.img.widthMm;
         } else {
           doc.text(seg.text, curX, yPos);
@@ -520,8 +529,7 @@ export async function generateEbookPdf(data, onProgress) {
       }
     };
 
-    onProgress(5, 'Building Cover and Table of Contents...');
-    await new Promise(r => setTimeout(r, 50));
+    await onProgress(5, 'Building Cover and Table of Contents...');
 
     // === 1. Cover Page ===
     fillPageBg();
@@ -591,8 +599,7 @@ export async function generateEbookPdf(data, onProgress) {
       const totalMsgsSoFar = conversations.slice(0, c).reduce((sum, cv) => sum + (cv.messages || []).length, 0);
       const totalMsgsAll = conversations.reduce((sum, cv) => sum + (cv.messages || []).length, 0);
       const msgPct = totalMsgsAll > 0 ? Math.floor((totalMsgsSoFar / totalMsgsAll) * 85) : Math.floor((c / totalConvs) * 85);
-      onProgress(10 + msgPct, `Processing Chat ${c + 1}/${totalConvs}: ${conv.name} (${conv.total} msgs)`);
-      await new Promise(r => setTimeout(r, 0)); // UI breathe
+      await onProgress(10 + msgPct, `Processing Chat ${c + 1}/${totalConvs}: ${conv.name} (${conv.total} msgs)`);
       
       // Title Page (no header on title pages)
       _inMessages = false;
@@ -673,9 +680,19 @@ export async function generateEbookPdf(data, onProgress) {
       
       const msgs = conv.messages || [];
       const totalMsgs = msgs.length;
+      const emojiRenderEnabled = true;
       let currentDateStr = '';
-      
+      // Progress range for this conversation: 10..93, split across all messages
+      const convStartPct = 10 + Math.floor((c / totalConvs) * 83);
+      const convEndPct   = 10 + Math.floor(((c + 1) / totalConvs) * 83);
+      const PROGRESS_EVERY = Math.max(1, Math.floor(totalMsgs / 20)); // ~20 updates per chat
+
       for (let m = 0; m < totalMsgs; m++) {
+         // Update progress bar ~20 times per conversation
+         if (m % PROGRESS_EVERY === 0) {
+           const pct = convStartPct + Math.floor((m / Math.max(totalMsgs, 1)) * (convEndPct - convStartPct));
+           await onProgress(pct, `Chat ${c + 1}/${totalConvs}: ${conv.name} — msg ${m}/${totalMsgs}`);
+         }
          const msgObj = msgs[m];
          const msg = msgObj.msg || msgObj; // Safe access
          if (!msg || (msg.timestamp == null || (msg.timestamp === 0 && msg.dateStr === ''))) continue;
@@ -705,7 +722,7 @@ export async function generateEbookPdf(data, onProgress) {
          const timeStr = `${formatTimeForDisplay(msg.timestamp)} @ ${plat}`;
          
          let msgText = String(msg.content || '[Media omitted]');
-         // Strip invisible control chars and markdown syntax only — emoji rendered via canvas
+         // Strip invisible control chars and markdown syntax
          msgText = msgText.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFFFC\uFFFD]/g, '')
                           .replace(/\*\*(.*?)\*\*/g, '$1')
                           .replace(/\*(.*?)\*/g, '$1')
@@ -725,10 +742,10 @@ export async function generateEbookPdf(data, onProgress) {
          // Measure a string's rendered width including emoji (which have 0 width in jsPDF)
          const measureW = (str) => {
            if (!str) return 0;
-           if (!hasEmoji(str)) return doc.getTextWidth(str);
+           if (!emojiRenderEnabled || !hasEmoji(str)) return doc.getTextWidth(str);
            return splitEmojiSegments(str).reduce((sum, seg) => {
              if (seg.isEmoji) {
-               return sum + renderToImage(seg.text, 11, { bgColor: '#ffffff', fgColor: '#000000' }).widthMm;
+               return sum + renderToImage(seg.text, 11, {}).widthMm;
              }
              return sum + doc.getTextWidth(seg.text);
            }, 0);
@@ -781,10 +798,10 @@ export async function generateEbookPdf(data, onProgress) {
          // Pre-render emoji segments for each line ONCE — reused for both width measurement
          // and actual rendering, avoiding double canvas work
          const renderedLines = lines.map(ln => {
-           if (!ln || !hasEmoji(ln)) return { raw: ln, segments: null, totalW: measureW(ln) };
+           if (!ln || !emojiRenderEnabled || !hasEmoji(ln)) return { raw: ln, segments: null, totalW: measureW(ln) };
            const segs = splitEmojiSegments(ln).map(seg => {
              if (seg.isEmoji) {
-               const img = renderToImage(seg.text, 11, { bgColor: bubbleBgCss, fgColor: bubbleFgCss });
+               const img = renderToImage(seg.text, 11, {});
                return { ...seg, img, w: img.widthMm };
              }
              return { ...seg, w: doc.getTextWidth(seg.text) };
@@ -839,7 +856,7 @@ export async function generateEbookPdf(data, onProgress) {
               for (const seg of rl.segments) {
                 if (seg.isEmoji) {
                   const yOff = seg.img.heightMm * 0.85;
-                  doc.addImage(seg.img.dataUrl, 'JPEG', curX, bY - yOff, seg.img.widthMm, seg.img.heightMm);
+                  doc.addImage(seg.img.dataUrl, seg.img.format, curX, bY - yOff, seg.img.widthMm, seg.img.heightMm, seg.img.alias);
                 } else {
                   doc.text(seg.text, curX, bY);
                 }
@@ -857,17 +874,10 @@ export async function generateEbookPdf(data, onProgress) {
          doc.setTextColor(...theme.textMain);
 
          y += bubbleH + 3;
-
-         
-         // Occasional yield for huge chats to not freeze browser entirely
-         if (m % 500 === 0) {
-            await new Promise(r => setTimeout(r, 0)); 
-         }
       }
     }
     
-    onProgress(95, 'Adding page numbers, links & bookmarks...');
-    await new Promise(r => setTimeout(r, 50));
+    await onProgress(95, 'Adding page numbers, links & bookmarks...');
 
     const totalPages = doc.internal.getNumberOfPages();
     for (let p = 2; p <= totalPages; p++) {
@@ -911,13 +921,11 @@ export async function generateEbookPdf(data, onProgress) {
       console.warn('Could not add PDF bookmarks:', e);
     }
     
-    onProgress(98, 'Saving document...');
-    await new Promise(r => setTimeout(r, 50));
-    
+    await onProgress(98, 'Saving document...');
     const filename = `${(data.ebookName || 'Ebook').replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, '_')}.pdf`;
     doc.save(filename);
 
-    onProgress(100, 'Download started!');
+    await onProgress(100, 'Download started!');
   } catch (err) {
     console.error('PDF generation error:', err);
     throw err;

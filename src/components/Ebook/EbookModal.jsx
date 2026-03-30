@@ -24,6 +24,8 @@ export default function EbookModal() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState('');
+  const [done, setDone] = useState(false);
+  const [timeTaken, setTimeTaken] = useState(0);
 
   // Get all unique chat names based on current global filters
   const availableChats = useMemo(() => {
@@ -115,8 +117,17 @@ export default function EbookModal() {
     }
 
     setGenerating(true);
+    setDone(false);
     setProgress(0);
     setProgressText('Preparing ebook data...');
+    const startTime = Date.now();
+
+    // onProgress yields to browser on every call so the bar actually moves
+    const onProgress = async (pct, text) => {
+      setProgress(pct);
+      setProgressText(text);
+      await new Promise(r => requestAnimationFrame(r));
+    };
 
     try {
       // Build the data for PDF generation
@@ -153,10 +164,16 @@ export default function EbookModal() {
           // Detect platforms
           const platforms = Array.from(data.platforms || new Set());
 
-          // Calculate true min/max for duration
-          const validTs = msgs.map(m => m.timestamp).filter(t => t && t > 0);
-          const firstMsg = validTs.length > 0 ? Math.min(...validTs) : data.firstMsg;
-          const lastMsg = validTs.length > 0 ? Math.max(...validTs) : data.lastMsg;
+          // Calculate true min/max for duration — avoid spread on large arrays (stack overflow)
+          let firstMsg = data.firstMsg;
+          let lastMsg = data.lastMsg;
+          for (const m of msgs) {
+            const t = m.timestamp;
+            if (t && t > 0) {
+              if (firstMsg === undefined || t < firstMsg) firstMsg = t;
+              if (lastMsg === undefined || t > lastMsg) lastMsg = t;
+            }
+          }
 
           return {
             name,
@@ -179,16 +196,14 @@ export default function EbookModal() {
         theme: pdfTheme
       };
 
-      await generateEbookPdf(ebookData, (pct, text) => {
-        setProgress(pct);
-        setProgressText(text);
-      });
+      await generateEbookPdf(ebookData, onProgress);
 
-      setProgressText('Ebook generated successfully!');
-      setTimeout(() => {
-        setGenerating(false);
-        dispatch({ type: 'SHOW_EBOOK_MODAL', payload: false });
-      }, 1000);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      setTimeTaken(elapsed);
+      setProgress(100);
+      setProgressText('Done!');
+      setGenerating(false);
+      setDone(true);
     } catch (err) {
       console.error('Ebook generation failed:', err);
       alert('Failed to generate ebook: ' + err.message);
@@ -384,7 +399,7 @@ export default function EbookModal() {
         </div>
 
         {/* Progress */}
-        {generating && (
+        {(generating || done) && (
           <div className="ebook-progress">
             <div className="ebook-progress-bar">
               <div className="ebook-progress-fill" style={{ width: `${progress}%` }} />
@@ -393,23 +408,43 @@ export default function EbookModal() {
           </div>
         )}
 
+        {/* Success banner */}
+        {done && (
+          <div className="ebook-success-banner">
+            <div className="ebook-success-icon">✅</div>
+            <div className="ebook-success-text">
+              <strong>PDF generated &amp; downloaded!</strong>
+              <span>Completed in {timeTaken}s</span>
+            </div>
+            <button
+              className="btn-generate"
+              style={{ marginLeft: 'auto', flexShrink: 0 }}
+              onClick={() => dispatch({ type: 'SHOW_EBOOK_MODAL', payload: false })}
+            >
+              Close
+            </button>
+          </div>
+        )}
+
         {/* Actions */}
-        <div className="ebook-actions">
-          <button
-            className="btn-cancel-modal"
-            onClick={() => dispatch({ type: 'SHOW_EBOOK_MODAL', payload: false })}
-            disabled={generating}
-          >
-            Cancel
-          </button>
-          <button
-            className="btn-generate"
-            onClick={handleGenerate}
-            disabled={generating || filteredConversations.length === 0}
-          >
-            {generating ? '⏳ Generating...' : `📖 Generate Ebook (${filteredConversations.length} chats)`}
-          </button>
-        </div>
+        {!done && (
+          <div className="ebook-actions">
+            <button
+              className="btn-cancel-modal"
+              onClick={() => dispatch({ type: 'SHOW_EBOOK_MODAL', payload: false })}
+              disabled={generating}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn-generate"
+              onClick={handleGenerate}
+              disabled={generating || filteredConversations.length === 0}
+            >
+              {generating ? `⏳ Generating... ${progress}%` : `📖 Generate Ebook (${filteredConversations.length} chats)`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
