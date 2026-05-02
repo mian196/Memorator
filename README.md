@@ -27,6 +27,6 @@ You can download it securely from F-Droid: [https://f-droid.org/packages/com.git
 
 ## Getting Started Locally
 1. Clone the repository.
-2. Run `npm install` to install local dependencies (`jszip`, `jspdf`, `mammoth`, etc.).
-3. Run `npm start` to spin up the local development server on Port 3000.
+2. Run `npm install` to install local dependencies (`jszip`, `jspdf`, `file-saver`, etc.).
+3. Run `npm run dev` to spin up the local development server on Port 3000.
 4. Upload your chat dumps and generate your books!
