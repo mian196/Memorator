@@ -164,9 +164,12 @@ body {
 .contact-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; }
 .badge-sent { color: var(--accent-primary); }
 .badge-recv { color: var(--text-muted); }
-.group-badge {
-  font-size: 0.65rem; background: rgba(255,255,255,0.1); padding: 2px 4px;
-  border-radius: 4px; margin-left: 5px; display: inline-block;
+.contact-badges { display: flex; align-items: center; gap: 4px; }
+.merged-badge {
+  font-size: 0.65rem; background: rgba(59, 130, 246, 0.2); 
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary); padding: 1px 4px;
+  border-radius: 4px; font-weight: bold;
 }
 
 /* Sidebar footer */

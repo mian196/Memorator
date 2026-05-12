@@ -5,10 +5,22 @@ export function recalculateChats(messages, media, myNames, excludeNames, aliasMa
   let validMsgCount = 0;
   const effectiveMyNames = myNames.length > 0 ? myNames : ['Me'];
 
+  const processedHashes = new Set();
+
   messages.forEach(msg => {
     const mappedThread = getMappedName(msg.threadName, aliasMap);
     const mappedSender = getMappedName(msg.sender, aliasMap);
     if (isExcluded(mappedThread, mappedSender, excludeNames)) return;
+
+    // Fuzzy De-duplication Logic
+    // Overlapping exports often have slight variations in timestamps (rounding) 
+    // or source attribution, but the content + sender + proximate time are usually identical.
+    const timeBucket = Math.floor((msg.timestamp || 0) / 2000); // 2-second window
+    const contentKey = (msg.content || '').substring(0, 100).toLowerCase().replace(/\s+/g, '');
+    const msgHash = `${mappedThread}|${mappedSender}|${timeBucket}|${contentKey}`;
+
+    if (processedHashes.has(msgHash)) return;
+    processedHashes.add(msgHash);
 
     validMsgCount++;
     if (!chats[mappedThread]) {

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useReducer, useCallback, useRef } from 'react';
 import { parseInputList, updateAliasMap, getMappedName, isExcluded, parseTimestamp } from '../utils/helpers';
 import { recalculateChats } from '../utils/stats';
-import { parseHTML, parseJSON, parseWhatsAppTXT, parseNDJSON, parseSMSJSON } from '../utils/parsers';
+import { parseHTML, parseJSON, parseWhatsAppTXT, parseNDJSON, parseSMSJSON, parseE2EEJSON } from '../utils/parsers';
 import JSZip from 'jszip';
 import { saveStateToDB, loadStateFromDB, clearStateFromDB } from '../utils/db';
 
@@ -218,13 +218,18 @@ export function AppProvider({ children }) {
   const handleUpload = useCallback(async (files) => {
     if (files.length === 0) return;
 
+    dispatch({ type: 'SET_LOADING', payload: { loading: true, message: 'Collecting and extracting files...' } });
+
     const expandedFiles = [];
+    const registry = {};
 
     // Pre-process ZIP files
     for (const f of files) {
       if (f.name.endsWith('.zip')) {
         try {
           const zip = await JSZip.loadAsync(f);
+          const zipName = f.name.replace('.zip', '');
+          
           for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
             if (zipEntry.dir) continue;
 
@@ -237,10 +242,12 @@ export function AppProvider({ children }) {
               const extractedFile = new File([blob], relativePath.split('/').pop(), { type: blob.type });
               
               // Attach the original zip name + internal path so parsers group them correctly
+              const fullPath = `${zipName}/${relativePath}`;
               Object.defineProperty(extractedFile, 'webkitRelativePath', {
-                value: `${f.name.replace('.zip', '')}/${relativePath}`
+                value: fullPath
               });
               expandedFiles.push(extractedFile);
+              registry[fullPath] = extractedFile;
             }
           }
         } catch (e) {
@@ -248,14 +255,11 @@ export function AppProvider({ children }) {
         }
       } else {
         expandedFiles.push(f);
+        const pathKey = f.webkitRelativePath || f.name;
+        registry[pathKey] = f;
       }
     }
 
-    const registry = {};
-    expandedFiles.forEach(f => {
-      const pathKey = f.webkitRelativePath || f.name;
-      registry[pathKey] = f;
-    });
     dispatch({ type: 'SET_FILE_REGISTRY', payload: registry });
 
     const dataFiles = expandedFiles.filter(
@@ -292,8 +296,17 @@ export function AppProvider({ children }) {
             try { parsed = JSON.parse(text); } catch(e) { parsed = null; }
             if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].address && parsed[0].body !== undefined) {
               result = parseSMSJSON(text, file.name, currMyNames);
+            } else if (parsed && parsed.messages && Array.isArray(parsed.messages)) {
+              // Check for E2EE vs Legacy
+              const firstMsg = parsed.messages[0];
+              if (firstMsg && firstMsg.timestamp_ms) {
+                result = parseE2EEJSON(text, file.webkitRelativePath, currMyNames, mergedRegistry);
+              } else {
+                result = parseJSON(text, file.webkitRelativePath, currMyNames, mergedRegistry);
+              }
             } else {
-              result = parseJSON(text, file.webkitRelativePath, currMyNames, mergedRegistry);
+              // Fallback or invalid JSON
+              result = { messages: [], media: [] };
             }
           }
           else if (file.name.endsWith('.txt')) result = parseWhatsAppTXT(text, file.name, currMyNames);

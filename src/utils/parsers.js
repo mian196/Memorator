@@ -241,16 +241,91 @@ export function parseSMSJSON(text, filename, myNames) {
   return { messages, media: [] };
 }
 
+// --- Facebook Messenger E2EE JSON Parser (Secure Storage) ---
+export function parseE2EEJSON(text, filePath, myNames, fileRegistry) {
+  const messages = [];
+  const media = [];
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return { messages, media }; }
+  if (!data.messages || !Array.isArray(data.messages)) return { messages, media };
+
+  let rawTitle = data.title || '';
+  let parsedParticipants = [];
+  if (Array.isArray(data.participants)) {
+    parsedParticipants = data.participants
+      .map(p => (typeof p === 'object' && p.name ? p.name : (typeof p === 'string' ? p : '')))
+      .filter(Boolean);
+  }
+  let threadName = cleanThreadName(rawTitle, parsedParticipants, myNames);
+
+  const pathParts = filePath.split('/');
+  const fileName = pathParts.pop();
+  const folderName = pathParts.pop() || '';
+  const dirPath = [...pathParts, folderName].filter(Boolean).join('/') + '/';
+  const displayPath = folderName ? `${folderName}/${fileName}` : fileName;
+
+  data.messages.forEach(msg => {
+    if (msg.is_unsent) return;
+    const sender = msg.sender_name || 'Unknown';
+    const content = msg.content || '';
+    let timestamp = msg.timestamp_ms || 0;
+    let dateStr = timestamp ? new Date(timestamp).toLocaleString() : '';
+    const reactions = msg.reactions ? msg.reactions.map(r => r.reaction) : [];
+
+    // Handle Photos
+    if (msg.photos && msg.photos.length > 0) {
+      msg.photos.forEach(p => {
+        if (p.uri) {
+          const mediaItem = resolveMedia(p.uri, dirPath, threadName, sender, dateStr, 'image', fileRegistry);
+          if (mediaItem) media.push(mediaItem);
+        }
+      });
+    }
+    
+    // Handle Videos
+    if (msg.videos && msg.videos.length > 0) {
+      msg.videos.forEach(v => {
+        if (v.uri) {
+          const mediaItem = resolveMedia(v.uri, dirPath, threadName, sender, dateStr, 'video', fileRegistry);
+          if (mediaItem) media.push(mediaItem);
+        }
+      });
+    }
+
+    if (content || (msg.photos && msg.photos.length > 0) || (msg.videos && msg.videos.length > 0)) {
+      messages.push({
+        threadName, sender, content: content || '[Media]', dateStr,
+        timestamp, reactions, 
+        _source: 'E2EE JSON (' + displayPath + ')',
+        platform: 'Messenger',
+        isE2EE: true
+      });
+    }
+  });
+
+  return { messages, media };
+}
+
 // --- Media Resolution Helper ---
 function resolveMedia(path, baseDir, threadName, sender, dateStr, type, fileRegistry) {
+  // Try absolute path in registry
   let fileObj = fileRegistry[path];
+  
   if (!fileObj) {
+    // Try path relative to base directory
+    const relativePath = baseDir + path.replace(/^\.\//, '');
+    fileObj = fileRegistry[relativePath];
+  }
+
+  if (!fileObj) {
+    // Last resort: search by filename in the registry
     const filename = path.split('/').pop();
     const matchKey = Object.keys(fileRegistry).find(
-      key => key.endsWith(filename) && key.startsWith(baseDir)
+      key => key.endsWith(filename) && key.includes(threadName.replace(/\s+/g, '').toLowerCase())
     );
     if (matchKey) fileObj = fileRegistry[matchKey];
   }
+
   if (fileObj) {
     return {
       type, url: URL.createObjectURL(fileObj),

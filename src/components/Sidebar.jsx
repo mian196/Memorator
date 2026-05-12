@@ -170,9 +170,14 @@ export default function Sidebar() {
               >
                 <div className="contact-name">
                   {name}
-                  {state.sidebarFilter === 'all' && data.isGroup && (
-                    <span className="group-badge">Group</span>
-                  )}
+                  <div className="contact-badges">
+                    {state.sidebarFilter === 'all' && data.isGroup && (
+                      <span className="group-badge">Group</span>
+                    )}
+                    {data.platforms && data.platforms.size > 1 && (
+                      <span className="merged-badge" title={Array.from(data.platforms).join(', ')}>Merged</span>
+                    )}
+                  </div>
                 </div>
                 <div className="contact-meta">
                   <span className="badge-sent">↑{data.sent}</span>{' '}

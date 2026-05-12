@@ -52,13 +52,15 @@ export default function ContentArea() {
     const lines = [
       `CHAT HISTORY: ${activeChatName}`,
       `Exported on: ${new Date().toLocaleString()}`,
-      `Total Messages: ${chatData.total}\n`,
+      `Total Messages: ${chatData.total}`,
+      `Platforms: ${Array.from(chatData.platforms).join(', ')}\n`,
       '--------------------------------------------------\n'
     ];
     [...chatData.list].reverse().forEach(msg => {
       const mappedSender = getMappedName(msg.sender, aliasMap);
       const isMe = myNames.includes(mappedSender) || myNames.includes(msg.sender);
-      lines.push(`[${msg.dateStr}] ${isMe ? 'ME' : mappedSender}:`);
+      const plat = msg.platform || (msg._source && msg._source.includes('E2EE') ? 'Messenger (E2EE)' : 'Messenger');
+      lines.push(`[${msg.dateStr}] ${isMe ? 'ME' : mappedSender} (@${plat}):`);
       if (msg.reactions && msg.reactions.length > 0) lines.push(`Reactions: ${msg.reactions.join(', ')}`);
       lines.push(msg.content);
       lines.push('');
@@ -70,6 +72,27 @@ export default function ContentArea() {
     a.click();
     URL.revokeObjectURL(url);
   }, [chatData, activeChatName, aliasMap, myNames]);
+
+  const exportMergedJSON = useCallback(() => {
+    if (!chatData) return;
+    const exportData = {
+      threadName: activeChatName,
+      exportDate: new Date().toISOString(),
+      participants: Array.from(chatData.participants),
+      platforms: Array.from(chatData.platforms),
+      messages: chatData.list.map(m => ({
+        sender: getMappedName(m.sender, aliasMap),
+        content: m.content,
+        timestamp: m.timestamp,
+        dateStr: m.dateStr,
+        reactions: m.reactions,
+        platform: m.platform || 'Messenger',
+        isE2EE: !!m.isE2EE
+      }))
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    saveAs(blob, `Merged_Chat_${activeChatName.replace(/[^a-z0-9]/gi, '_')}.json`);
+  }, [chatData, activeChatName, aliasMap]);
 
   const excludeParticipant = useCallback((name) => {
     if (!name) return;
@@ -173,6 +196,7 @@ export default function ContentArea() {
         <div className="export-buttons">
           {showChatTabs && (
             <>
+              <button className="btn" onClick={exportMergedJSON}>Export Merged JSON</button>
               <button className="btn" onClick={exportTxt}>Export TXT</button>
               <button className="btn" onClick={() => dispatch({ type: 'SHOW_EBOOK_MODAL', payload: { show: true, targetChat: activeChatName } })}>Print / PDF</button>
             </>
